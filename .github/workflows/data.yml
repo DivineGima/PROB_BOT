@@ -15,11 +15,27 @@ on:
           - bootstrap
           - ingest
           - d1-probe
+          - backtest
       seasons:
         description: "Seasons for bootstrap, newest first (1 to 10)"
         type: string
         required: false
         default: "3"
+      test_days:
+        description: "Backtest: length of the test period in days"
+        type: string
+        required: false
+        default: "365"
+      half_lives:
+        description: "Backtest: comma-separated time-decay half-lives to sweep (days)"
+        type: string
+        required: false
+        default: "200,300,450"
+      shrinks:
+        description: "Backtest: comma-separated team shrinkage strengths to sweep"
+        type: string
+        required: false
+        default: "2,4,8"
 
 permissions:
   contents: read
@@ -50,6 +66,9 @@ jobs:
           # Inputs reach the shell only as environment variables, never inside the script text.
           COMMAND: ${{ inputs.command }}
           SEASONS: ${{ inputs.seasons }}
+          TEST_DAYS: ${{ inputs.test_days }}
+          HALF_LIVES: ${{ inputs.half_lives }}
+          SHRINKS: ${{ inputs.shrinks }}
           PYTHONPATH: src
           # The legal register entry for football-data.org is signed (docs/legal/source_terms_register.md).
           SOURCE_ENABLED_FDORG: "1"
@@ -64,5 +83,6 @@ jobs:
             bootstrap)         python -m footy.cli bootstrap --seasons "$SEASONS" ;;
             ingest)            python -m footy.cli ingest ;;
             d1-probe)          python -m footy.repo.d1_probe ;;
+            backtest)          python -m footy.cli backtest --test-days "$TEST_DAYS" --half-lives "$HALF_LIVES" --shrinks "$SHRINKS" ;;
             *) echo "unknown command" >&2; exit 64 ;;
           esac

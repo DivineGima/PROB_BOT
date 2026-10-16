@@ -284,3 +284,29 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 | Stage 2: Ingestion, aliases and bootstrap | **complete** (code, live bootstrap and ingest verified, review findings fixed) |
 | Stage 3: Dixon-Coles, backtest harness, metrics | not started; next |
 | Stages 4 to 7 | not started (Stages 5 and 7 wait for the new architecture version) |
+
+---
+
+## 2026-10-17 (night) — Stage 3 built: Dixon-Coles, scoring, backtest, golden vectors (code complete; live backtest pending)
+
+- **Built against:** `PRD_1.md`, `system_architecture_1.md`, `system_architecture_essential_1.md`, Stage 3 (all N=1; alignment and drift checks clean). Branch `feat/stage-3-dixon-coles`.
+- **Done (tests green: 287 pytest, ruff, mypy strict, repo rule checks):**
+  1. `footy.models.grid`: 13x13 grids (independent Poisson, Dixon-Coles tau, bivariate Poisson already for Stage 4), markets, linear pool, extreme-fixture guard.
+  2. `footy.scoring`: RPS (1X2 and totals), log loss, Brier per over line, league-frequency baseline, calibration bins; hand-computed tests.
+  3. `footy.models.structure` and `dixon_coles`: pooled attack/defence with league offsets and ridge shrinkage, time-decay weights, 1,095-day window, vectorised negative log-likelihood with analytic gradient (checked against finite differences), L-BFGS-B, sanity checks, `failed` outcome instead of a silent fallback.
+  4. `footy backtest` (`footy.backtest`): walk-forward folds fitted only on earlier matches (a spy test proves no leakage), baseline from the same training window, per-competition and overall RPS, paired difference, optional half-life and shrinkage sweep, text report, `job_runs` record. `data.yml` gained a `backtest` command.
+  5. Golden vectors `packages/contracts/golden/dc_grid_v1.json` plus a write/check module and test.
+  6. Synthetic league generator and parameter-recovery test (correlation above 0.93, home advantage and rho within 0.06 of the truth).
+  7. New dependencies: `numpy`, `scipy` (runtime), `hypothesis` (dev); lockfiles regenerated with hashes. No `penaltyblog`, no pandas.
+- **Hand mutations (6, each caught):** tau sign, RPS normalisation, training on the fold's own matches, decay sign, a tau gradient sign, the home-advantage gradient.
+- **Findings:** (a) the 1e-6 tail claim in architecture section 8.1 holds per side only up to about 2.3 goals (measured; recorded in `docs/verification.md` section 5; for the next architecture snapshot). (b) a test exposed a real crash path (negative tau for an extreme fixture); fixed with the guard. (c) `cli.py` now applies the football-data.org legal gate only to `bootstrap` and `ingest`, so model commands need only the D1 token.
+- **Open (Stage 3 exit criterion):** run the `backtest` command from Actions after merge, record the numbers in `docs/verification.md` section 5, and state whether Dixon-Coles beats the baseline (essentials Stage 3 step 8). If it does not, the shortfall must be documented and escalated to Divine.
+- **`fit` command:** the essentials list it under Stage 3, but a fit run is persisted in tables that Stage 4 creates (ADR-033), so `footy fit` and `footy publish` land in Stage 4.
+
+### Module status
+| Module | Status |
+|---|---|
+| Stage 1, Stage 2 | **complete** |
+| Stage 3: Dixon-Coles, backtest harness, metrics | code **complete**; live backtest and the baseline verdict **in-progress** |
+| Stage 4 | started on a stacked branch at Divine's request (see next entry when written) |
+| Stages 5 to 7 | not started (Stages 5 and 7 wait for the new architecture version) |

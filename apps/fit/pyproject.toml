@@ -37,3 +37,8 @@ python_version = "3.12"
 strict = true
 mypy_path = "src"
 files = ["src", "tests"]
+
+# scipy ships no type stubs; it is used only through scipy.optimize.minimize.
+[[tool.mypy.overrides]]
+module = ["scipy", "scipy.*"]
+ignore_missing_imports = true
