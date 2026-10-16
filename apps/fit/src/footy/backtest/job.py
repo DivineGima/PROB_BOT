@@ -54,8 +54,11 @@ def run_backtest_job(
     ``half_lives`` or ``shrinks`` the first combination is the reported run and every combination
     appears in the sweep table (starting values are chosen from it by hand, never auto-applied)."""
     ops = OpsRepo(db)
-    job_id = ops.start_job("backtest", now(), git_sha)
     summary: dict[str, object] = {"mode": "backtest"}
+    try:
+        job_id = ops.start_job("backtest", now(), git_sha)
+    except D1Error as exc:
+        return JobResult(ExitCode.UNEXPECTED, {**summary, "error": str(exc)})
     try:
         if test_days < 1 or fold_days < 1:
             raise DataError("test_days and fold_days must be at least 1")
@@ -63,7 +66,10 @@ def run_backtest_job(
         shrink_values = list(shrinks) if shrinks else [FitConfig().shrink_team]
         if len(half_life_values) * len(shrink_values) > MAX_SWEEP_CONFIGS:
             raise DataError(f"at most {MAX_SWEEP_CONFIGS} sweep combinations")
-        fitters = fitters_for(models)
+        try:
+            fitters = fitters_for(models)
+        except ValueError as exc:
+            raise DataError(str(exc)) from None
 
         repo = TrainingRepo(db)
         matches = repo.finished_matches()

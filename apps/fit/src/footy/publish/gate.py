@@ -1,0 +1,144 @@
+"""Promotion gate (architecture section 8.6, ADR-030). Pure: it reads a snapshot of a candidate run
+and returns every reason it fails, so a rejected run explains itself.
+
+Structural checks:
+
+1. the run is still ``building``;
+2. at least one model is ``ok``, and every model the run attempted has a ``model_params`` row;
+3. ``team_form`` covers at least 95% of the active teams;
+4. every ``ok`` payload parses, carries the version this code understands, and its SHA-256 matches
+   the stored hash (read back from the database, not from memory);
+5. row counts are plausible: each ``ok`` payload holds at least 95% of the teams that had training
+   matches.
+
+Stability guard (unvalidated): versus the active run, no team's attack/defence (``dc``, ``bp``) or
+home/away rating (``pi``) moves by more than ``stability_bound``. There is deliberately NO
+performance comparison with the active run: the new run's window includes the most recent days, so
+such a comparison would be in-sample (ADR-030).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+
+from footy.config import GATE_FORM_COVERAGE, GATE_PAYLOAD_COVERAGE, STABILITY_BOUND
+from footy.models.registry import team_values
+from footy.repo.models import STATUS_BUILDING, ParamRow
+
+SUPPORTED_PAYLOAD_VERSION = 1
+
+
+@dataclass(frozen=True)
+class GateInput:
+    run_status: str
+    attempted_models: Sequence[str]
+    params: Sequence[ParamRow]
+    form_rows: int  # team_form rows of active teams
+    active_teams: int
+    n_teams_training: int  # teams with training matches, from the run's diagnostics
+    active_payloads: Mapping[str, dict[str, object]] = field(default_factory=dict)
+    stability_bound: float = STABILITY_BOUND
+    form_coverage: float = GATE_FORM_COVERAGE
+    payload_coverage: float = GATE_PAYLOAD_COVERAGE
+
+
+@dataclass(frozen=True)
+class GateResult:
+    passed: bool
+    reasons: list[str]
+    checks: dict[str, object]
+
+    def as_dict(self) -> dict[str, object]:
+        return {"passed": self.passed, "reasons": self.reasons, "checks": self.checks}
+
+
+def _decode(row: ParamRow, reasons: list[str]) -> dict[str, object] | None:
+    """The payload of an ``ok`` row if its hash and shape verify, else None (with a reason)."""
+    if row.payload_json is None or row.payload_sha256 is None:
+        reasons.append(f"{row.model}: an ok model has no payload or hash")
+        return None
+    if hashlib.sha256(row.payload_json.encode("utf-8")).hexdigest() != row.payload_sha256:
+        reasons.append(f"{row.model}: payload hash does not verify (corrupted or altered)")
+        return None
+    try:
+        payload = json.loads(row.payload_json)
+    except ValueError:
+        reasons.append(f"{row.model}: payload is not valid JSON")
+        return None
+    if not isinstance(payload, dict) or payload.get("payload_version") != SUPPORTED_PAYLOAD_VERSION:
+        reasons.append(f"{row.model}: payload version is not {SUPPORTED_PAYLOAD_VERSION}")
+        return None
+    if not isinstance(payload.get("teams"), dict):
+        reasons.append(f"{row.model}: payload has no team table")
+        return None
+    return payload
+
+
+def evaluate_gate(gate: GateInput) -> GateResult:
+    reasons: list[str] = []
+    checks: dict[str, object] = {}
+
+    checks["status_building"] = gate.run_status == STATUS_BUILDING
+    if not checks["status_building"]:
+        reasons.append(f"run status is {gate.run_status!r}, not 'building'")
+
+    by_model = {p.model: p for p in gate.params}
+    ok_rows = [p for p in gate.params if p.status == "ok"]
+    checks["models_ok"] = [p.model for p in ok_rows]
+    if not ok_rows:
+        reasons.append("no model is ok")
+    missing = [m for m in gate.attempted_models if m not in by_model]
+    if missing:
+        reasons.append(f"no model_params row for: {', '.join(sorted(missing))}")
+
+    coverage = gate.form_rows / gate.active_teams if gate.active_teams else 0.0
+    checks["team_form_coverage"] = round(coverage, 4)
+    if gate.active_teams == 0 or coverage < gate.form_coverage:
+        reasons.append(
+            f"team_form covers {gate.form_rows} of {gate.active_teams} active teams "
+            f"(need {gate.form_coverage:.0%})"
+        )
+
+    payloads: dict[str, dict[str, object]] = {}
+    for row in ok_rows:
+        payload = _decode(row, reasons)
+        if payload is None:
+            continue
+        payloads[row.model] = payload
+        teams = payload["teams"]
+        assert isinstance(teams, dict)  # noqa: S101 (checked by _decode)
+        needed = gate.payload_coverage * gate.n_teams_training
+        if len(teams) < max(1, needed):
+            reasons.append(
+                f"{row.model}: payload holds {len(teams)} teams but {gate.n_teams_training} "
+                f"teams had training matches (need {gate.payload_coverage:.0%})"
+            )
+    checks["payload_hashes_verified"] = sorted(payloads)
+
+    jumps: dict[str, object] = {}
+    for model, payload in sorted(payloads.items()):
+        previous = gate.active_payloads.get(model)
+        if previous is None:
+            continue
+        new_values, old_values = team_values(model, payload), team_values(model, previous)
+        worst_team, worst = None, 0.0
+        over = 0
+        for team_id, values in new_values.items():
+            if team_id not in old_values:
+                continue
+            move = max(abs(a - b) for a, b in zip(values, old_values[team_id], strict=True))
+            if move > gate.stability_bound:
+                over += 1
+            if move > worst:
+                worst_team, worst = team_id, move
+        jumps[model] = {"max_move": round(worst, 6), "team_id": worst_team, "over_bound": over}
+        if over:
+            reasons.append(
+                f"{model}: {over} team value(s) moved more than {gate.stability_bound} versus the "
+                f"active run (largest {worst:.3f}, team {worst_team})"
+            )
+    checks["stability"] = jumps
+    return GateResult(not reasons, reasons, checks)

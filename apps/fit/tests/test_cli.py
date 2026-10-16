@@ -263,3 +263,48 @@ def test_backtest_without_the_database_settings_is_a_config_error(
     code = main(["backtest"], env={})
     assert code == 2
     assert "CF_ACCOUNT_ID" in json.loads(capsys.readouterr().out)["error"]
+
+
+# -- Stage 4: fit and publish ---------------------------------------------------------------------
+
+
+def test_fit_then_publish_through_the_cli_and_rollback(capsys: pytest.CaptureFixture[str]) -> None:
+    db = _seeded_db()
+    code, out = run(["fit", "--models", "dc"], capsys, env=D1_ONLY_ENV, db=db)
+    assert code == 0
+    fit_summary = json.loads(out)
+    assert fit_summary["models_ok"] == ["dc"] and fit_summary["run_status"] == "building"
+    assert "cf-secret-token" not in out
+
+    code, out = run(["publish"], capsys, env=D1_ONLY_ENV, db=db)
+    assert code == 0 and json.loads(out)["result"] == "promoted"
+    first = fit_summary["run_id"]
+    assert db.rows("SELECT run_id FROM active_run")[0]["run_id"] == first
+
+    code, out = run(["publish", "--rollback", first], capsys, env=D1_ONLY_ENV, db=db)
+    assert code == 0 and json.loads(out)["result"] == "already active"
+
+
+def test_fit_accepts_as_of_and_rejects_bad_arguments(capsys: pytest.CaptureFixture[str]) -> None:
+    db = _seeded_db()
+    code, out = run(
+        ["fit", "--models", "dc", "--as-of", "2026-01-31"], capsys, env=D1_ONLY_ENV, db=db
+    )
+    assert code == 0 and json.loads(out)["as_of"] == "2026-01-31"
+    code, out = run(["fit", "--models", "nope"], capsys, env=D1_ONLY_ENV, db=SqliteD1())
+    assert code == 2 and "unknown model" in json.loads(out)["error"]
+    with pytest.raises(SystemExit):  # argparse: not a date
+        run(["fit", "--as-of", "yesterday"], capsys, env=D1_ONLY_ENV, db=SqliteD1())
+
+
+def test_publish_rejects_run_id_together_with_rollback(capsys: pytest.CaptureFixture[str]) -> None:
+    code, out = run(
+        ["publish", "--run-id", "R1", "--rollback", "R2"], capsys, env=D1_ONLY_ENV, db=SqliteD1()
+    )
+    assert code == 2 and "either" in json.loads(out)["error"]
+
+
+def test_model_commands_never_touch_football_data_org(capsys: pytest.CaptureFixture[str]) -> None:
+    env = {**D1_ONLY_ENV, "SOURCE_ENABLED_FDORG": "0"}  # the legal gate is off; fit still runs
+    code, _ = run(["fit", "--models", "dc"], capsys, env=env, db=_seeded_db())
+    assert code == 0

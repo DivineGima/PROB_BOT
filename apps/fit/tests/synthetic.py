@@ -12,7 +12,7 @@ from datetime import date, timedelta
 
 import numpy as np
 
-from footy.models.grid import GRID_SIZE, dixon_coles_grid
+from footy.models.grid import GRID_SIZE, bivariate_poisson_grid, dixon_coles_grid
 from footy.models.types import TrainingMatch
 
 COMP_CODES = ("EPL", "LL", "BL", "SA", "L1")
@@ -28,6 +28,7 @@ class SyntheticWorld:
     gamma: float
     rho: float
     as_of: date
+    lambda3: float | None = None  # set: scores come from a bivariate Poisson instead
     comp_of_team: dict[int, str] = field(default_factory=dict)
 
     def lambdas(self, home_id: int, away_id: int) -> tuple[float, float]:
@@ -47,6 +48,7 @@ def generate_world(
     mu: float = 0.15,
     gamma: float = 0.25,
     rho: float = -0.08,
+    lambda3: float | None = None,
     team_sd: float = 0.25,
     league_sd: float = 0.12,
 ) -> SyntheticWorld:
@@ -72,7 +74,9 @@ def generate_world(
             members[code].append(next_id)
             next_id += 1
 
-    world = SyntheticWorld([], leagues, attack, defence, mu, gamma, rho, as_of, comp_of_team)
+    world = SyntheticWorld(
+        [], leagues, attack, defence, mu, gamma, rho, as_of, lambda3, comp_of_team
+    )
     pairs: list[tuple[str, int, int, date]] = []
     for s in range(seasons):
         season_end = as_of - timedelta(days=365 * (seasons - 1 - s))
@@ -116,6 +120,9 @@ def _sample_score(
     rng: np.random.Generator, world: SyntheticWorld, h: int, a: int
 ) -> tuple[int, int]:
     lam1, lam2 = world.lambdas(h, a)
-    grid = dixon_coles_grid(lam1, lam2, world.rho)
+    if world.lambda3 is not None:
+        grid = bivariate_poisson_grid(lam1, lam2, world.lambda3)
+    else:
+        grid = dixon_coles_grid(lam1, lam2, world.rho)
     cell = int(rng.choice(GRID_SIZE * GRID_SIZE, p=grid.ravel()))
     return cell // GRID_SIZE, cell % GRID_SIZE

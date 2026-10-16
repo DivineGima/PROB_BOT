@@ -50,6 +50,19 @@ BOOTSTRAP_SEASONS = 3
 MAX_DISAGREEMENTS = 3
 EVENT_DEDUPE_HOURS = 24
 
+# Model run settings (architecture sections 5.4, 8.3, 8.4, 8.6). All are starting values and are
+# snapshotted into ``model_runs.config_json``; none is validated yet.
+MIN_TEAM_MATCHES = 10  # fewer training matches than this -> INSUFFICIENT_HISTORY (FR-10)
+DRIFT_THRESHOLD_GOALS = 0.6  # goals per match, ADR-021 (goals only in v1, ADR-026)
+STALE_HOURS = 36  # STALE MODELS banner age (ADR-015)
+STABILITY_BOUND = 0.5  # promotion gate: largest allowed move of a team value versus the active run
+GATE_FORM_COVERAGE = 0.95  # team_form must cover this share of active teams
+GATE_PAYLOAD_COVERAGE = 0.95  # a payload must cover this share of teams with training matches
+ENSEMBLE_KAPPA = 100.0  # softmax sharpness on mean RPS (RPS differences between models are tiny)
+ENSEMBLE_RECENT = 200  # most recent scored predictions used for the rolling RPS
+ENSEMBLE_SHRINK_N = 50  # pseudo-count of the prior in the weight shrinkage
+RUNS_KEPT = 30  # retained model runs (ADR-004)
+
 
 @dataclass(frozen=True)
 class Settings:

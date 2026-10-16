@@ -1,5 +1,6 @@
 """``footy`` command line (architecture section 6.7). Stage 2 provides ``bootstrap`` and ``ingest``,
-Stage 3 adds ``backtest``; the other commands in the table arrive with their stages.
+Stage 3 adds ``backtest``, Stage 4 adds ``fit`` and ``publish``; the other commands in the table
+arrive with their stages.
 
 Exit codes: 0 ok, 1 unexpected, 2 data/validation failure, 3 source outage, 4 fit failure.
 The summary printed on stdout never contains tokens or raw source payloads.
@@ -20,6 +21,7 @@ from footy.aliases import load_reference
 from footy.backtest.job import DEFAULT_FOLD_DAYS, DEFAULT_TEST_DAYS, run_backtest_job
 from footy.config import MIN_REQUEST_INTERVAL_S, Settings, load_settings
 from footy.errors import ConfigError, ExitCode, FootyError
+from footy.fitting import run_fit_job
 from footy.ingest.fd_org import FdOrgClient
 from footy.ingest.pacer import Pacer
 from footy.ingest.pipeline import (
@@ -30,6 +32,8 @@ from footy.ingest.pipeline import (
     run_ingest,
 )
 from footy.models.registry import FITTERS
+from footy.models.types import MODELS
+from footy.publish.job import run_publish_job
 from footy.repo.d1_client import D1Client, D1Error, JsonFileProgress, MemoryProgress, Progress
 from footy.repo.ports import Database
 
@@ -98,7 +102,40 @@ def build_parser() -> argparse.ArgumentParser:
     back.add_argument(
         "--out", type=Path, default=None, help="also write the text report to this file"
     )
+
+    fit = sub.add_parser(
+        "fit",
+        help="fit dc / pi / bp, weight the ensemble, snapshot team form; writes a building run",
+    )
+    fit.add_argument("--models", default=",".join(MODELS), help="comma-separated model names")
+    fit.add_argument(
+        "--as-of",
+        type=date.fromisoformat,
+        default=None,
+        help="YYYY-MM-DD; window and time decay end here (default: the latest stored result)",
+    )
+
+    publish = sub.add_parser(
+        "publish", help="run the promotion gate and make a built run active (or roll back)"
+    )
+    publish.add_argument(
+        "--run-id", default=None, help="run to publish (default: the newest 'building' run)"
+    )
+    publish.add_argument(
+        "--rollback",
+        default=None,
+        metavar="RUN_ID",
+        help="point the active run back at a retained 'superseded' run (no gate)",
+    )
     return parser
+
+
+def _models_arg(raw: str) -> list[str]:
+    models = [m.strip() for m in str(raw).split(",") if m.strip()]
+    unknown = [m for m in models if m not in FITTERS]
+    if not models or unknown:
+        raise ConfigError(f"unknown model(s) {unknown or raw!r}; known: {sorted(FITTERS)}")
+    return models
 
 
 def _float_list(raw: str | None, name: str) -> list[float] | None:
@@ -119,10 +156,7 @@ def _run_backtest(
     database_factory: DatabaseFactory,
     git_sha: str | None,
 ) -> JobResult:
-    models = [m.strip() for m in str(args.models).split(",") if m.strip()]
-    unknown = [m for m in models if m not in FITTERS]
-    if not models or unknown:
-        raise ConfigError(f"unknown model(s) {unknown or args.models!r}; known: {sorted(FITTERS)}")
+    models = _models_arg(args.models)
     half_lives = _float_list(args.half_lives, "--half-lives")
     shrinks = _float_list(args.shrinks, "--shrinks")
     out: Path | None = args.out
@@ -208,6 +242,22 @@ def main(
         if args.command == "backtest":
             # model commands need only the database, not football-data.org
             result = _run_backtest(args, settings, database_factory, git_sha)
+        elif args.command == "fit":
+            result = run_fit_job(
+                database_factory(settings),
+                models=_models_arg(args.models),
+                as_of=args.as_of,
+                git_sha=git_sha,
+            )
+        elif args.command == "publish":
+            if args.run_id and args.rollback:
+                raise ConfigError("use either --run-id or --rollback, not both")
+            result = run_publish_job(
+                database_factory(settings),
+                run_id=args.run_id,
+                rollback=args.rollback,
+                git_sha=git_sha,
+            )
         else:
             result = _run_data_command(
                 args, settings, client_factory, database_factory, today, git_sha

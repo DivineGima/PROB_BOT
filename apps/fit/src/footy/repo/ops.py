@@ -125,6 +125,21 @@ class OpsRepo:
         )
         return int(rows[1][0]["n"]) > 0
 
+    def latest_job_summary(self, kind: str) -> dict[str, object] | None:
+        """The stored summary of the newest finished job of this kind (``ok`` or ``partial``)."""
+        rows = self._db.query(
+            "SELECT summary_json FROM job_runs WHERE kind = ? AND status IN ('ok', 'partial') "
+            "AND summary_json IS NOT NULL ORDER BY job_id DESC LIMIT 1",
+            (kind,),
+        )
+        if not rows:
+            return None
+        try:
+            loaded = json.loads(rows[0]["summary_json"])
+        except (TypeError, ValueError):
+            return None
+        return loaded if isinstance(loaded, dict) else None
+
     def count_events(self, kind: str) -> int:
         rows = self._db.query("SELECT COUNT(*) AS n FROM events WHERE kind = ?", (kind,))
         return int(rows[0]["n"])
