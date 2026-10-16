@@ -1,0 +1,52 @@
+# Verification record (Essentials 1, Stage 1)
+
+What was verified, how, and what is still open. Numbers marked **indicative** are not the ADR-013 gate.
+
+## 1. Verify-at-build items (architecture section 16)
+
+| # | Item | Status | Evidence |
+|---|---|---|---|
+| 1 | football-data.org free-history depth, fields, terms | **Open, reported to Divine.** Free-tier history depth is not stated on any official page; written terms were not found | `docs/legal/source_terms_register.md` section 1. Settling it needs an authenticated request, blocked by the legal gate |
+| 2 | football-data.co.uk terms for hand download; CSV headers | **Checked, not conclusive.** The site is "for private individuals" and "league match prediction only"; manual download is not addressed. CSV column headers are verified in Stage 2 against hand-written fixtures | Register section 2 |
+| 3 | D1 REST batch support and the 100-bound-parameter limit | **Partly verified.** The OpenAPI spec accepts `{"batch": [...]}` and a single `{sql, params}`. The 100-parameter limit and batch atomicity are **not confirmed from documentation**; the live probe `python -m footy.repo.d1_probe` answers both once a real D1 exists. The client enforces 100 and is tested against a fake. | Cloudflare API spec, `d1_probe.py`, `tests/test_d1_probe.py` |
+| 4 | Workers Logs retention; D1 Time Travel retention (Free) | **Workers Logs: 3 days on Free** (7 days from the 2026-12-01 observability pricing change). Pull `cpuTime` within 3 days of the spike. **Time Travel retention: not confirmed** in this session; check in the dashboard before the Stage 7 restore drill | Cloudflare docs, Workers pricing page |
+| 5 | GitHub branch protection and environments on a private Free repo; 60-day auto-disable | **Branch protection and deployment protection: not available** for private repos on Free (search of GitHub docs, secondary sources agree). **Compensating controls are wired:** committed `pre-push` hook (tested against a real `git push`), `deploy.yml` merged-PR guard, `CF_DEPLOY_TOKEN` referenced only from `deploy.yml`. 60-day auto-disable: documented for public repos only; confirm once at the Stage 7 schedule check | `scripts/hooks/pre-push`, `scripts/verify-merged-pr.mjs`, `.github/workflows/deploy.yml` |
+| 6 | soccernews.com terms | **Checked.** Personal, non-commercial use only; the system never reads the site | Register section 3 |
+| 7 | Worker CPU of the real engine (ADR-013 spike) | **Pending production measurement.** Indicative local numbers in section 2 | Section 2 |
+| 8 | Pi-rating constants | Stage 4 | none |
+
+Other facts found while building (re-verify, limits change):
+- D1 Free daily row read and write limits have been **hard-enforced since 2026-09-01**: queries fail until 00:00 UTC. The client raises `D1QuotaError` and does not retry.
+- Workers Free CPU limit and request limits: as in architecture section 16 (not re-checked this session).
+- The Workers test package was renamed: use `@cloudflare/vitest-plugin` (v1), not `@cloudflare/vitest-pool-workers`.
+- The Worker bundle is about 789 KiB (126 KiB gzip), mostly Zod. This is far below the Free plan's size limit; Zod's startup cost should be re-read from the deployed Worker.
+
+## 2. CPU spike (ADR-013, Essentials 1 Stage 1 steps 7 and 8)
+
+**What the spike runs** (`apps/bot/src/spike`, path `POST /spike/<WEBHOOK_PATH_SECRET>`, off unless `SPIKE_ENABLED=1`): parse a 60-match, ~47 KB schema-v1-shaped upload, validate it with a Zod placeholder schema, parse three ~45-51 KB model blobs (module-level strings standing in for D1 rows), then per match build three 169-cell grids (Dixon-Coles tau, independent Poisson from a pi-style goal difference, bivariate Poisson convolution), linear-pool them, derive 1X2 and six over lines from the pooled grid, render and split replies at 3,900 characters.
+
+**What it leaves out (so a pass here is optimistic by roughly this much):** grammY glue (estimated 0.5-2 ms in section 8.10), the D1 reads and writes, and Telegram `getFile`/`sendMessage` subrequest handling. Stages 5 and 7 re-measure the real path.
+
+**Method (production, the gate):** deploy with `SPIKE_ENABLED=1`, run `node scripts/cpu-spike.mjs --n 25`, then export the invocation records (Workers Logs, or `wrangler tail --format json`) and run `node scripts/cpu-stats.mjs <file> --min 20`. It prints p50 / p95 / max and the verdict. `cpuTime` is whole milliseconds, so a reported "6" can hide 5.5-6.4 ms. Switch the path off after recording.
+
+**Indicative local result (Node 24 on Divine's Windows laptop, NOT workerd, NOT the gate):** the bundled Worker answered the 60-match upload in a p50 of about **9-14 ms** and a p95 of about **14-30 ms** of wall time over 60 invocations, across 3 runs, with high run-to-run noise. Breakdown (p50, per request): JSON parse of the upload 0.4 ms, Zod 0.8 ms, parse of three blobs 2.2 ms, 60 Dixon-Coles grids 0.4 ms, 60 independent grids 0.8 ms, 60 bivariate-Poisson grids 1.3 ms, pool and markets 0.6 ms, the rest (rendering, allocation, lookups) the remainder.
+
+**What this suggests, honestly:** the workload as designed is at risk of exceeding the 6 ms p95 target. The largest single costs are parsing the model blobs and validation, which is exactly what F1 targets (fetch per-team rows instead of whole blobs, drop Zod for bulk arrays). Server CPUs are usually faster than this laptop, so the production number may well be lower, but this must not be assumed. **Decision gate (step 8) is open until the production measurement exists.** If p95 > 6 ms: apply F1 and re-measure; F2/F3 and the parked "pre-computed grids" idea in the tracker go to Divine as an architecture change, not silently.
+
+**Recorded production result:** _not yet measured_ (needs the deployed Worker; see `docs/setup.md`).
+
+| Run | Date | Invocations | p50 ms | p95 ms | max ms | Verdict |
+|---|---|---|---|---|---|---|
+| (none yet) | | | | | | |
+
+## 3. Tests run for Stage 1
+
+| Suite | Command | Result at 2026-10-16 |
+|---|---|---|
+| Worker (Vitest, workerd, local D1 with the real migration) | `npm run test:bot` | 64 passed |
+| Repo rules and tools (node:test) | `npm run test:scripts` | 41 passed |
+| Python (pytest) | `cd apps/fit && python -m pytest` | 41 passed |
+| Lint, format, types | `npm run lint`, `npm run typecheck`, `ruff`, `mypy --strict` | clean |
+| Secret scan | `gitleaks detect --no-git` | no leaks (fake test values allowlisted by exact value in `.gitleaks.toml`) |
+
+Mutation checks done by hand (each breaks one behavior and the suite must fail): auth compare always true, group chats allowed, dedupe always "first time", D1 parameter cap removed, client errors retried, resume key ignoring data. Every one was caught.

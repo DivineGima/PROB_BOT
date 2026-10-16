@@ -1,0 +1,13 @@
+# Secret-scan config (architecture section 9.1, S6). Default rules stay on; only the exact fake values that
+# tests and the local bench use are allowlisted, by value, so a real secret in a test file is still caught.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Obviously fake fixtures (never real values)"
+regexTarget = "secret"
+regexes = [
+  '''^(test-|bench-)?(path|header)-secret-0123456789$''',
+  '''^super-secret-token-value-123$''',
+  '''^123456:BOT-TOKEN-VALUE$''',
+]

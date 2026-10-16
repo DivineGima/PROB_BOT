@@ -1,0 +1,15 @@
+# Supply-chain hygiene (architecture section 9.1, S8): monthly update PRs, reviewed like any other PR.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: pip
+    directory: /apps/fit
+    schedule:
+      interval: monthly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

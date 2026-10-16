@@ -1,0 +1,21 @@
+name = "prob-bot"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+
+# Workers Logs: the CPU gate reads `cpuTime` from invocation logs (ADR-013, section 8.10).
+[observability]
+enabled = true
+
+# Secrets (set with `wrangler secret put`, never in this file):
+#   TELEGRAM_WEBHOOK_SECRET, WEBHOOK_PATH_SECRET, ALLOWED_CHAT_ID, ALLOWED_USER_ID
+# SPIKE_ENABLED is a plain var for the Stage 1 CPU spike path; it is off unless set to "1".
+[vars]
+SPIKE_ENABLED = "0"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "prob-bot"
+# Real id of the production database (an identifier, not a credential). deploy.yml refuses to deploy
+# if this ever reverts to the all-zeros placeholder.
+database_id = "f0d80197-890a-4009-8844-4d0fc82223f4"
+migrations_dir = "../../db/migrations"

@@ -1,0 +1,33 @@
+# dependencies and build output
+node_modules/
+dist/
+.wrangler/
+coverage/
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# secrets (CLAUDE.md: never in code, logs, tests or commits)
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+*.pem
+*.key
+
+# raw source data is never committed (ADR-025); local CSV downloads live outside the repo
+*.csv
+!packages/contracts/**/*.csv
+
+# local measurement output
+.measurements/
+
+# editor / OS
+.DS_Store
+Thumbs.db
+.idea/

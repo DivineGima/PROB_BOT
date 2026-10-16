@@ -1,0 +1,28 @@
+{
+  "name": "prob-bot",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Football Reliability Screener and Probability Bot (monorepo root)",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "apps/bot",
+    "packages/*"
+  ],
+  "scripts": {
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "typecheck": "npm run typecheck --workspace apps/bot && tsc -p scripts/tsconfig.json",
+    "test": "npm run test:bot && npm run test:scripts",
+    "test:bot": "npm run test --workspace apps/bot",
+    "test:scripts": "node --test \"scripts/**/*.test.mjs\"",
+    "check:repo": "node scripts/check-sql-locality.mjs && node scripts/check-secret-readers.mjs && node scripts/check-no-data-files.mjs && node scripts/lint-migrations.mjs",
+    "hooks:install": "node scripts/install-hooks.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3"
+  }
+}
