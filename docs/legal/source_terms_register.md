@@ -6,7 +6,7 @@ Personal, non-commercial, probabilities-only use. This is a record of what the s
 
 | Source | Flag | Status | Signed by | Date signed |
 |---|---|---|---|---|
-| football-data.org (free tier API) | `SOURCE_ENABLED_FDORG` | **OFF, unsigned** | none | none |
+| football-data.org (free tier API) | `SOURCE_ENABLED_FDORG` | **Signed to enable** (flag stays off in code until Stage 2 turns it on) | Divine Gima | 2026-10-16 |
 | football-data.co.uk (hand-downloaded CSV files) | `SOURCE_ENABLED_FDUK` | **OFF permanently** (ADR-035: never fetched automatically). Hand download and `footy load-csv` is a manual, local step | none | none |
 | soccernews.com | none | Outside the system: read only by Divine's Claude Project | not applicable | not applicable |
 
@@ -22,7 +22,7 @@ Personal, non-commercial, probabilities-only use. This is a record of what the s
   - Coverage page: "Access to data of these leagues & cups is free. Forever."
 - **Terms of use:** no usage terms (personal, commercial, caching, redistribution) were found on the pages above. The pricing page says to check the documentation or contact the operator. **Written terms were not located.**
 - **Free-history depth: NOT CONFIRMED.** No official page states how many past seasons the free tier returns. A competitor's blog (secondary, commercially interested) says "current season only". Only a real authenticated request for a past season can settle it, and that request is blocked by the legal gate. **If the answer is current-season only**, most teams stay under 10 matches (`INSUFFICIENT_HISTORY`) for weeks and predictions start as teams reach 10 matches (warm-up, ADR-035). Reported to Divine in the Stage 1 tracker entry.
-- **Decision recorded:** none yet. `SOURCE_ENABLED_FDORG` stays off.
+- **Decision recorded:** enable, signed by Divine Gima on 2026-10-16 (signature block below). The flag is still off in code; Stage 2 turns it on. The free-history depth is still to be measured with one authenticated request.
 - **Open for Divine:** (a) email the operator for written terms, or accept personal use under the free plan as stated; (b) after signing, make one authenticated request for a past season to measure the real history depth.
 
 ## 2. football-data.co.uk (hand-downloaded CSV files, A-1)
@@ -37,7 +37,7 @@ Personal, non-commercial, probabilities-only use. This is a record of what the s
 - **Coverage:** England (Premiership, Divs 1-3, Conference), Scotland (Premiership, Divs 1-3), Germany, Italy, Spain, France, Netherlands (Eredivisie), Belgium, Portugal (Liga I), Turkey, Greece, plus extra worldwide leagues. Match statistics (shots) since 2000/01 for the major European leagues. The page's own season claims are inconsistent (a 32-season header against 1993/94 in the body). No Champions League.
 - **Reading of the clauses:** the stated purpose ("league match prediction") and audience ("private individuals") fit this project's personal, probabilities-only use. The automated-access clause is ambiguous: it may bar all bots or only commercial and training uses. **The page does not address manual downloading by a private individual.** Nothing in the design fetches this site automatically, so the ambiguous clause does not apply to the planned use.
 - **Result for A-1 (the Stage 1 check Divine's decision depends on):** the page gives no express permission or prohibition for manual personal downloads. It points toward **path 1 being acceptable** (manual download for personal prediction use, no bot). The wording is not an explicit grant, so the decision is Divine's.
-- **Decision recorded:** none yet. `SOURCE_ENABLED_FDUK` stays off permanently; path 1 needs no flag because no HTTP client exists.
+- **Decision recorded:** A-1 **path 2** chosen by Divine Gima on 2026-10-16: football-data.org only, the Scottish Premiership is dropped, football-data.co.uk is not used at all (no hand downloads, no `footy load-csv`). `SOURCE_ENABLED_FDUK` stays off permanently.
 - **Open for Divine:** choose A-1 path 1 or path 2 (architecture section 4.3, ADR-035). If path 1, optionally email the site operator to confirm manual personal download in writing and file the reply here.
 
 ## 3. soccernews.com
@@ -54,11 +54,11 @@ Personal, non-commercial, probabilities-only use. This is a record of what the s
 
 ```
 Source:        football-data.org
-Decision:      [ ] enable   [ ] keep off
-Signed by:     ______________   Date: __________
+Decision:      [x] enable   [ ] keep off
+Signed by:     _divine gima_____________   Date: __________10/16/2026
 ```
 
 ```
-A-1 path:      [ ] path 1 (hand-download co.uk files)   [ ] path 2 (football-data.org only, drop SPL)
-Signed by:     ______________   Date: __________
+A-1 path:      [ ] path 1 (hand-download co.uk files)   [x] path 2 (football-data.org only, drop SPL)
+Signed by:     _divine gima_____________   Date: __________10/16/2026
 ```

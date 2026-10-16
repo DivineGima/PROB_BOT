@@ -1,0 +1,311 @@
+{
+  "schema_version": 1,
+  "status": "DRAFT",
+  "note": "History-only clubs (active=0): played in one of the ten competitions in 2023-24, 2024-25 or 2025-26 but are not in canonical_teams.json. Compiled by Claude Code from memory and cross-checked against the 2026-27 lists in PRD_1; not checked against any data source. Entries with verify=true are from 2025-26 only and are less certain. Scottish Premiership clubs are left out because A-1 path 2 drops that league. Clubs still missing are caught by the Stage 2 unmapped-team report, never guessed. Per-source aliases are added in Stage 2 under data/aliases/.",
+  "clubs": [
+    {
+      "canonical_name": "Luton Town",
+      "last_competition": "CHA",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Leicester City",
+      "last_competition": "CHA",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Sheffield Wednesday",
+      "last_competition": "CHA",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Plymouth Argyle",
+      "last_competition": "CHA",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Huddersfield Town",
+      "last_competition": "CHA",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Rotherham United",
+      "last_competition": "CHA",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Oxford United",
+      "last_competition": "CHA",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Almería",
+      "last_competition": "LL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Cádiz",
+      "last_competition": "LL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Girona",
+      "last_competition": "LL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Granada",
+      "last_competition": "LL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Las Palmas",
+      "last_competition": "LL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Mallorca",
+      "last_competition": "LL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Leganés",
+      "last_competition": "LL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Real Valladolid",
+      "last_competition": "LL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Real Oviedo",
+      "last_competition": "LL",
+      "is_ucl_only": 0,
+      "verify": true
+    },
+    {
+      "canonical_name": "Bochum",
+      "last_competition": "BL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Darmstadt",
+      "last_competition": "BL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Heidenheim",
+      "last_competition": "BL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Holstein Kiel",
+      "last_competition": "BL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "St. Pauli",
+      "last_competition": "BL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Wolfsburg",
+      "last_competition": "BL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Empoli",
+      "last_competition": "SA",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Hellas Verona",
+      "last_competition": "SA",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Salernitana",
+      "last_competition": "SA",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Pisa",
+      "last_competition": "SA",
+      "is_ucl_only": 0,
+      "verify": true
+    },
+    {
+      "canonical_name": "Cremonese",
+      "last_competition": "SA",
+      "is_ucl_only": 0,
+      "verify": true
+    },
+    {
+      "canonical_name": "Clermont Foot",
+      "last_competition": "L1",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Metz",
+      "last_competition": "L1",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Montpellier",
+      "last_competition": "L1",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Nantes",
+      "last_competition": "L1",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Reims",
+      "last_competition": "L1",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Saint-Étienne",
+      "last_competition": "L1",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Almere City",
+      "last_competition": "ERE",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Heracles Almelo",
+      "last_competition": "ERE",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "NAC Breda",
+      "last_competition": "ERE",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "RKC Waalwijk",
+      "last_competition": "ERE",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Vitesse",
+      "last_competition": "ERE",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Volendam",
+      "last_competition": "ERE",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "AVS",
+      "last_competition": "PPL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Boavista",
+      "last_competition": "PPL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Chaves",
+      "last_competition": "PPL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Farense",
+      "last_competition": "PPL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Portimonense",
+      "last_competition": "PPL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Tondela",
+      "last_competition": "PPL",
+      "is_ucl_only": 0,
+      "verify": true
+    },
+    {
+      "canonical_name": "Vizela",
+      "last_competition": "PPL",
+      "is_ucl_only": 0
+    },
+    {
+      "canonical_name": "Copenhagen",
+      "last_competition": null,
+      "is_ucl_only": 1
+    },
+    {
+      "canonical_name": "Young Boys",
+      "last_competition": null,
+      "is_ucl_only": 1
+    },
+    {
+      "canonical_name": "Crvena Zvezda",
+      "last_competition": null,
+      "is_ucl_only": 1
+    },
+    {
+      "canonical_name": "Royal Antwerp",
+      "last_competition": null,
+      "is_ucl_only": 1
+    },
+    {
+      "canonical_name": "Red Bull Salzburg",
+      "last_competition": null,
+      "is_ucl_only": 1
+    },
+    {
+      "canonical_name": "Sparta Prague",
+      "last_competition": null,
+      "is_ucl_only": 1
+    },
+    {
+      "canonical_name": "Dinamo Zagreb",
+      "last_competition": null,
+      "is_ucl_only": 1
+    },
+    {
+      "canonical_name": "Sturm Graz",
+      "last_competition": null,
+      "is_ucl_only": 1
+    },
+    {
+      "canonical_name": "Qarabag",
+      "last_competition": null,
+      "is_ucl_only": 1,
+      "verify": true
+    },
+    {
+      "canonical_name": "Olympiacos",
+      "last_competition": null,
+      "is_ucl_only": 1,
+      "verify": true
+    },
+    {
+      "canonical_name": "Pafos",
+      "last_competition": null,
+      "is_ucl_only": 1,
+      "verify": true
+    },
+    {
+      "canonical_name": "Kairat Almaty",
+      "last_competition": null,
+      "is_ucl_only": 1,
+      "verify": true
+    },
+    {
+      "canonical_name": "Union Saint-Gilloise",
+      "last_competition": null,
+      "is_ucl_only": 1,
+      "verify": true
+    }
+  ]
+}

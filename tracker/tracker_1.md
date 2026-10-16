@@ -227,3 +227,13 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 | Stage 1: Foundations and CPU spike | **complete** |
 | Stage 2: Ingestion, aliases and bootstrap | not started (legal gate: register unsigned, A-1 undecided, `data/historical_teams.json` missing) |
 | Stages 3 to 7 | not started (Stages 5 and 7 are affected by the pre-computed grids decision) |
+
+---
+
+## 2026-10-17 — Stage 2 prerequisites done (Stage 1 complete; Stage 2 not started)
+
+- **Built against:** `PRD_1.md`, `system_architecture_1.md`, `system_architecture_essential_1.md` (all N=1).
+- **Legal register signed (Divine Gima, 2026-10-16):** football-data.org **enable**; A-1 **path 2** (football-data.org only, Scottish Premiership dropped, football-data.co.uk not used at all). Flags are still off in code. The `FD_ORG_TOKEN` GitHub secret was added by Divine.
+- **Consequences of path 2 (architecture ADR-035):** no 3-season history from co.uk and no shots; SPL gets `INSUFFICIENT_HISTORY` and the screener prompt stops listing it. If the free tier returns only the current season, most teams stay under 10 matches for weeks (warm-up). The free-history depth is the open measurement: one authenticated request for a past season, after Stage 2 starts.
+- **Data files added:** `data/canonical_teams.json` (generated from PRD_1 section 12; 179 clubs, counts match the PRD table) and `data/historical_teams.json` (**DRAFT**, 59 history-only clubs from memory, cross-checked against the 2026-27 lists; 9 marked `verify`; SPL clubs left out; Divine to review). Per-source aliases come in Stage 2 under `data/aliases/`.
+- **Module status:** Stage 1 complete. Stage 2 not started.
