@@ -317,6 +317,39 @@ describe("smoke", () => {
     );
   });
 
+  it("ignores a delivery error older than 15 minutes but fails on a fresh one", async () => {
+    const hook = (/** @type {number} */ errorDate) =>
+      /** @type {typeof fetch} */ (
+        async (url, init) =>
+          new URL(String(url)).hostname === "api.telegram.org"
+            ? json({
+                ok: true,
+                result: {
+                  url: `${origin}/tg/${PATH_SECRET}`,
+                  last_error_message: "Connection timed out",
+                  last_error_date: errorDate,
+                },
+              })
+            : goodWorker(url, init)
+      );
+    const nowMs = Date.parse("2026-10-17T12:00:00Z");
+    const run = (/** @type {number} */ errorDate) =>
+      runSmoke({
+        workerUrl: origin,
+        pathSecret: PATH_SECRET,
+        botToken: BOT_TOKEN,
+        fetchImpl: hook(errorDate),
+        now: () => nowMs,
+      });
+    const old = await run(Math.floor(nowMs / 1000) - 2 * 24 * 3600);
+    assert.equal(
+      old.every((c) => c.ok),
+      true,
+    );
+    const fresh = await run(Math.floor(nowMs / 1000) - 60);
+    assert.equal(fresh.filter((c) => !c.ok).length, 1);
+  });
+
   it("fails when Telegram points elsewhere or reports a delivery error, and survives network errors", async () => {
     const wrongHook = /** @type {typeof fetch} */ (
       async (url, init) =>

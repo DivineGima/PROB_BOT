@@ -98,7 +98,6 @@ def main(
     try:
         settings = load_settings(env)
         token = settings.require_fd_org()  # the legal gate: refuses unless the flag is on
-        reference = load_reference()
         client = client_factory(token)
         day = today if today is not None else datetime.now(UTC).date()
         git_sha = (os.environ if env is None else env).get("GITHUB_SHA")
@@ -107,6 +106,7 @@ def main(
         if args.command == "bootstrap":
             if args.seasons is not None and not 1 <= args.seasons <= 10:
                 raise ConfigError("--seasons must be between 1 and 10")
+            reference = load_reference()  # only bootstrap needs the local team files
             db = None if args.dry_run else database_factory(settings)
             seasons = None
             if args.seasons is not None:
@@ -124,7 +124,6 @@ def main(
         else:
             result = run_ingest(
                 client,
-                reference,
                 db=database_factory(settings),
                 today=day,
                 check_team_lists=not args.skip_team_check,

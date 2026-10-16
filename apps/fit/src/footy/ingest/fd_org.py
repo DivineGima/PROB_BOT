@@ -18,7 +18,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import Any, Protocol
 
 from footy.errors import DataError, SourceAuthError, SourceOutage, SourceRestricted
 from footy.ingest.pacer import Pacer
@@ -51,10 +51,10 @@ class Transport(Protocol):
 class RequestsTransport:
     """Default transport. ``requests`` is imported lazily so tests never need the network stack."""
 
-    def __init__(self) -> None:
+    def __init__(self, session: Any = None) -> None:
         import requests
 
-        self._session = requests.Session()
+        self._session = session if session is not None else requests.Session()
         self._requests = requests
 
     def get(
@@ -64,18 +64,33 @@ class RequestsTransport:
             response = self._session.get(
                 url, headers=dict(headers), params=dict(params), timeout=timeout, stream=True
             )
-            body = response.raw.read(MAX_BODY_BYTES + 1, decode_content=True)
+            try:
+                # iter_content turns urllib3 read errors into requests exceptions, so a connection
+                # reset mid-body is retried like any other network failure.
+                chunks: list[bytes] = []
+                size = 0
+                for chunk in response.iter_content(chunk_size=65536):
+                    chunks.append(chunk)
+                    size += len(chunk)
+                    if size > MAX_BODY_BYTES:
+                        break
+                body = b"".join(chunks)
+                status = response.status_code
+                raw = response.headers.get("Retry-After") or response.headers.get(
+                    "X-RequestCounter-Reset"
+                )
+            finally:
+                response.close()
         except self._requests.RequestException as exc:
             # A plain OSError: the request object (which holds the token header) is not chained.
             raise OSError(type(exc).__name__) from None
         retry_after: float | None = None
-        raw = response.headers.get("Retry-After") or response.headers.get("X-RequestCounter-Reset")
         if raw is not None:
             try:
                 retry_after = float(raw)
             except ValueError:
                 retry_after = None
-        return HttpResponse(response.status_code, body, retry_after)
+        return HttpResponse(status, body, retry_after)
 
 
 @dataclass(frozen=True)

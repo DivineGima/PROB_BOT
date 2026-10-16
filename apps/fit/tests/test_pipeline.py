@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from footy.aliases import load_reference
-from footy.errors import ExitCode
+from footy.errors import DataError, ExitCode
 from footy.ingest.pipeline import (
     current_season_start_year,
     run_bootstrap,
@@ -167,15 +167,16 @@ def test_bootstrap_resumes_after_a_failure(tmp_path: Path) -> None:
     db = SqliteD1()
     progress_path = tmp_path / "progress.json"
     db.fail_at_request = 6  # part-way through the seed, after some chunks were applied
-    with pytest.raises(D1TransientError):
-        run_bootstrap(
-            make_client(ScriptedTransport(history_routes())),
-            REF,
-            db=db,
-            today=TODAY,
-            progress=JsonFileProgress(progress_path),
-            now=lambda: NOW,
-        )
+    failed = run_bootstrap(
+        make_client(ScriptedTransport(history_routes())),
+        REF,
+        db=db,
+        today=TODAY,
+        progress=JsonFileProgress(progress_path),
+        now=lambda: NOW,
+    )
+    assert failed.exit_code == ExitCode.UNEXPECTED
+    assert "injected failure" in str(failed.summary["error"])
     assert progress_path.exists()
     requests_before = db.requests
     db.fail_at_request = None
@@ -247,7 +248,7 @@ def play(match_id: int, home: str, away: str, day: str, **kw: Any) -> dict[str, 
 
 def ingest(db: SqliteD1, routes: dict[tuple[str, str], object], **kw: Any) -> Any:
     return run_ingest(
-        make_client(ScriptedTransport(routes)), REF, db=db, today=TODAY, now=lambda: NOW, **kw
+        make_client(ScriptedTransport(routes)), db=db, today=TODAY, now=lambda: NOW, **kw
     )
 
 
@@ -442,3 +443,134 @@ def test_no_secret_reaches_the_summary_or_the_database(seeded: SqliteD1) -> None
         + repr(seeded.rows("SELECT * FROM job_runs"))
     )
     assert TOKEN not in dump
+
+
+def test_anomaly_events_are_written_once_per_day_not_every_run(seeded: SqliteD1) -> None:
+    done = [play(1, "Arsenal FC", "Chelsea FC", "2026-10-12", full=(2, 0))]
+    ingest(seeded, window_routes(done))
+    stale = [
+        play(
+            1,
+            "Arsenal FC",
+            "Chelsea FC",
+            "2026-10-12",
+            status="TIMED",
+            duration=None,
+            full=(None, None),
+        )
+    ]
+    for _ in range(3):
+        result = ingest(seeded, window_routes(stale))
+        assert result.summary["anomalies"] == {"status_regression": 1}
+    assert (
+        seeded.scalar("SELECT COUNT(*) FROM events WHERE kind = 'anomaly_status_regression'") == 1
+    )
+
+
+def test_a_database_failure_is_recorded_on_the_job_and_exits_1(seeded: SqliteD1) -> None:
+    seeded.fail_when = lambda statements: statements[0].sql.startswith(
+        "INSERT OR IGNORE INTO source_fetch_log"
+    )
+    result = ingest(seeded, window_routes([play(1, "Arsenal FC", "Chelsea FC", "2026-10-12")]))
+    assert result.exit_code == ExitCode.UNEXPECTED
+    assert "injected failure" in str(result.summary["error"])
+    row = seeded.rows("SELECT status, error FROM job_runs ORDER BY job_id DESC LIMIT 1")[0]
+    assert row["status"] == "failed" and "injected failure" in row["error"]
+    # the fetch audit trail was still written by the failure handler
+    assert seeded.scalar("SELECT COUNT(*) FROM source_fetch_log") > 0
+
+
+def test_a_dead_database_does_not_crash_the_failure_handler(seeded: SqliteD1) -> None:
+    class Dead(SqliteD1):
+        dead_after = 10**9
+
+        def batch(self, statements):  # type: ignore[no-untyped-def]
+            if self.requests >= self.dead_after:
+                self.requests += 1
+                raise D1TransientError("down")
+            return super().batch(statements)
+
+    dead = Dead()
+    seed_reference(dead, REF, MemoryProgress())
+    dead.dead_after = dead.requests + 3  # start_job, the team count and the alias read still work
+    result = run_ingest(make_client(ScriptedTransport({})), db=dead, today=TODAY, now=lambda: NOW)
+    assert result.exit_code == ExitCode.UNEXPECTED
+    assert "down" in str(result.summary["error"])
+
+
+def many_fixtures(count: int) -> list[dict[str, Any]]:
+    teams = [
+        "Arsenal FC", "Chelsea FC", "Liverpool FC", "Manchester City FC", "Manchester United FC",
+        "Tottenham Hotspur FC", "Newcastle United FC", "Everton FC", "Fulham FC", "Leeds United FC",
+    ]  # fmt: skip
+    pairs = [(h, a) for h in teams for a in teams if h != a][:count]
+    return [
+        fd_match(1000 + i, h, a, f"2025-{8 + i // 28:02d}-{1 + i % 28:02d}T14:00:00Z", full=(1, 0))
+        for i, (h, a) in enumerate(pairs)
+    ]
+
+
+def test_a_rerun_after_a_failed_match_write_sends_only_the_missing_rows(tmp_path: Path) -> None:
+    routes: dict[tuple[str, str], object] = {("PL", "season:2025"): {"matches": many_fixtures(90)}}
+
+    def is_match_request(statements: Any) -> bool:
+        return bool(statements[0].sql.startswith("INSERT INTO matches"))
+
+    clean = SqliteD1()
+    run_bootstrap(
+        make_client(ScriptedTransport(routes)),
+        REF,
+        db=clean,
+        today=TODAY,
+        seasons=[2025],
+        now=lambda: NOW,
+    )
+    # 90 matches / 7 rows per statement / 10 statements per request
+    assert sum(1 for sql in clean.sent if sql.startswith("INSERT INTO matches")) == 2
+
+    db = SqliteD1()
+    seen = {"n": 0}
+
+    def fail_on_second_match_request(statements: Any) -> bool:
+        if is_match_request(statements):
+            seen["n"] += 1
+            return seen["n"] == 2
+        return False
+
+    db.fail_when = fail_on_second_match_request
+    path = tmp_path / "p.json"
+    first = run_bootstrap(
+        make_client(ScriptedTransport(routes)),
+        REF,
+        db=db,
+        today=TODAY,
+        seasons=[2025],
+        progress=JsonFileProgress(path),
+        now=lambda: "2026-10-17T01:00:00Z",
+    )
+    assert first.exit_code == ExitCode.UNEXPECTED
+    sent_before = sum(1 for sql in db.sent if sql.startswith("INSERT INTO matches"))
+    # The rerun compares with what is stored, so only the unsent second batch goes out.
+    result = run_bootstrap(
+        make_client(ScriptedTransport(routes)),
+        REF,
+        db=db,
+        today=TODAY,
+        seasons=[2025],
+        progress=JsonFileProgress(path),
+        now=lambda: "2026-10-17T09:30:00Z",
+    )
+    sent_after = sum(1 for sql in db.sent if sql.startswith("INSERT INTO matches")) - sent_before
+    assert result.exit_code == ExitCode.OK
+    assert sent_after == 1
+    assert result.summary["matches_unchanged"] == 70  # request one: 10 statements x 7 rows
+    assert result.summary["matches_inserted"] == 20
+    assert db.scalar("SELECT COUNT(*) FROM matches") == 90
+
+
+def test_a_stale_progress_file_is_a_clear_error_not_a_crash() -> None:
+    first = SqliteD1()
+    progress = MemoryProgress()
+    seed_reference(first, REF, progress)
+    with pytest.raises(DataError, match="progress file does not match the database"):
+        seed_reference(SqliteD1(), REF, progress)

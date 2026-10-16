@@ -66,10 +66,16 @@ async function handleTelegramUpdate(
 
   const session = checkSession(update, env);
   if (!session) {
-    // S2: no reply, no oracle. One counter event only; nothing about the sender is stored.
+    // S2: no reply, no oracle. A counter event at most once per hour, so a stranger messaging the
+    // public bot cannot use up D1's daily write quota; nothing about the sender is stored.
     ctx.waitUntil(
       repos.events
-        .record({ level: "info", source: "bot", kind: "ignored_update" })
+        .record({
+          level: "info",
+          source: "bot",
+          kind: "ignored_update",
+          dedupeKey: `ignored_update:${new Date().toISOString().slice(0, 13)}`,
+        })
         .catch(() => undefined),
     );
     logRequest({ request_id: requestId, route: "webhook", outcome: "ignored" });

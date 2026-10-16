@@ -6,6 +6,8 @@
  */
 export type Clock = () => Date;
 
+const EVENT_DEDUPE_MS = 24 * 60 * 60 * 1000;
+
 export type UploadStatus = "received" | "rejected" | "processed" | "failed";
 export type EventLevel = "info" | "warn" | "error";
 
@@ -149,19 +151,27 @@ export function createRepositories(db: D1Database, clock: Clock = () => new Date
 
   const events: EventRepository = {
     async record(event) {
+      const at = clock();
+      const detail = event.detail === undefined ? null : JSON.stringify(event.detail);
+      if (event.dedupeKey === undefined) {
+        await db
+          .prepare(
+            `INSERT INTO events (at, level, source, kind, detail_json, dedupe_key)
+             VALUES (?1, ?2, ?3, ?4, ?5, NULL)`,
+          )
+          .bind(toIso(at), event.level, event.source, event.kind, detail)
+          .run();
+        return;
+      }
+      // At most one event per key per 24 hours (section 9.2); a repeat costs one indexed read.
+      const cutoff = toIso(new Date(at.getTime() - EVENT_DEDUPE_MS));
       await db
         .prepare(
           `INSERT INTO events (at, level, source, kind, detail_json, dedupe_key)
-           VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6
+           WHERE NOT EXISTS (SELECT 1 FROM events WHERE dedupe_key = ?6 AND at >= ?7)`,
         )
-        .bind(
-          toIso(clock()),
-          event.level,
-          event.source,
-          event.kind,
-          event.detail === undefined ? null : JSON.stringify(event.detail),
-          event.dedupeKey ?? null,
-        )
+        .bind(toIso(at), event.level, event.source, event.kind, detail, event.dedupeKey, cutoff)
         .run();
     },
   };

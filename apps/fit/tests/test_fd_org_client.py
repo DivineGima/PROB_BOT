@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterator
+from typing import Any
 
 import pytest
 
 from footy.errors import DataError, SourceAuthError, SourceOutage, SourceRestricted
-from footy.ingest.fd_org import API_BASE, FdOrgClient, HttpResponse
+from footy.ingest.fd_org import API_BASE, FdOrgClient, HttpResponse, RequestsTransport
 from footy.ingest.pacer import Pacer
 from tests.helpers import TOKEN, ScriptedTransport, make_client
 
@@ -159,3 +161,91 @@ def test_teams_endpoint() -> None:
     fetched = make_client(transport).teams("PL")
     assert transport.calls[0]["url"].endswith("/competitions/PL/teams")
     assert fetched.record.rows == 1
+
+
+# -- the real transport, with a stub session (no network) --------------------------------
+
+
+class StubResponse:
+    def __init__(
+        self,
+        status: int = 200,
+        chunks: tuple[bytes, ...] = (),
+        headers: dict[str, str] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.status_code = status
+        self.headers = headers or {}
+        self._chunks = chunks
+        self._error = error
+        self.closed = False
+
+    def iter_content(self, chunk_size: int) -> Iterator[bytes]:
+        yield from self._chunks
+        if self._error is not None:
+            raise self._error
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class StubSession:
+    def __init__(
+        self, response: StubResponse | None = None, error: Exception | None = None
+    ) -> None:
+        self.response = response
+        self.error = error
+        self.calls: list[dict[str, Any]] = []
+
+    def get(self, url: str, **kwargs: Any) -> StubResponse:
+        self.calls.append({"url": url, **kwargs})
+        if self.error is not None:
+            raise self.error
+        assert self.response is not None
+        return self.response
+
+
+def test_real_transport_joins_chunks_and_closes_the_response() -> None:
+    response = StubResponse(200, (b'{"matches"', b": []}"), {"Retry-After": "12"})
+    transport = RequestsTransport(StubSession(response))
+    result = transport.get("https://x/y", {"X-Auth-Token": TOKEN}, {"season": "2025"}, 5.0)
+    assert (result.status, result.body, result.retry_after) == (200, b'{"matches": []}', 12.0)
+    assert response.closed
+
+
+def test_real_transport_turns_mid_body_failures_into_retryable_oserrors() -> None:
+    import requests
+
+    response = StubResponse(200, (b"{",), error=requests.exceptions.ChunkedEncodingError(TOKEN))
+    transport = RequestsTransport(StubSession(response))
+    with pytest.raises(OSError, match="ChunkedEncodingError") as info:
+        transport.get("https://x/y", {}, {}, 5.0)
+    assert response.closed and TOKEN not in str(info.value) and info.value.__cause__ is None
+
+    refused = RequestsTransport(StubSession(error=requests.exceptions.ConnectionError(TOKEN)))
+    with pytest.raises(OSError, match="ConnectionError"):
+        refused.get("https://x/y", {}, {}, 5.0)
+
+    # and the client retries such a failure like any other network error
+    client = FdOrgClient(
+        TOKEN,
+        transport=RequestsTransport(StubSession(response)),
+        pacer=Pacer(0),
+        base_delay=0.0,
+        sleep=lambda s: None,
+        rng=lambda: 0.5,
+        max_attempts=2,
+    )
+    with pytest.raises(SourceOutage):
+        client.matches("PL", season=2025)
+    assert len(client.fetches) == 2
+
+
+def test_real_transport_caps_the_body_and_ignores_a_bad_retry_header() -> None:
+    big = StubResponse(200, (b"x" * (21 * 1024 * 1024), b"never read"), {"Retry-After": "soon"})
+    result = RequestsTransport(StubSession(big)).get("https://x/y", {}, {}, 5.0)
+    assert len(result.body) == 21 * 1024 * 1024 and result.retry_after is None
+    with pytest.raises(DataError, match="too large"):
+        make_client(ScriptedTransport(sequence=[HttpResponse(200, result.body)])).matches(
+            "PL", season=2025
+        )

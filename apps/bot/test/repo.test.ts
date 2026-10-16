@@ -168,3 +168,29 @@ describe("EventRepository.record", () => {
     });
   });
 });
+
+describe("EventRepository.record dedupe", () => {
+  const count = async (where = "1=1") =>
+    (await env.DB.prepare(`SELECT COUNT(*) AS n FROM events WHERE ${where}`).first<{ n: number }>())
+      ?.n;
+
+  it("writes a keyed event once per 24 hours and again after the window", async () => {
+    const event = { level: "info", source: "bot", kind: "k", dedupeKey: "same" } as const;
+    await repos().events.record(event);
+    now = new Date("2026-10-16T20:00:00Z");
+    await repos().events.record(event);
+    expect(await count()).toBe(1);
+
+    now = new Date("2026-10-17T08:00:01Z");
+    await repos().events.record(event);
+    expect(await count()).toBe(2);
+  });
+
+  it("keeps different keys apart and never dedupes events without a key", async () => {
+    await repos().events.record({ level: "info", source: "bot", kind: "k", dedupeKey: "a" });
+    await repos().events.record({ level: "info", source: "bot", kind: "k", dedupeKey: "b" });
+    await repos().events.record({ level: "info", source: "bot", kind: "k" });
+    await repos().events.record({ level: "info", source: "bot", kind: "k" });
+    expect(await count()).toBe(4);
+  });
+});

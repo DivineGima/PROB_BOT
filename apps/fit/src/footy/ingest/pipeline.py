@@ -44,7 +44,7 @@ from footy.errors import (
 from footy.ingest.fd_org import FdOrgClient
 from footy.ingest.parse import ParseReport, parse_matches, parse_team_names, season_label
 from footy.reconcile.matches import Anomaly, MatchRow, plan_writes, to_row
-from footy.repo.d1_client import MemoryProgress, Progress, execute_resumable
+from footy.repo.d1_client import D1Error, MemoryProgress, Progress, execute_resumable
 from footy.repo.matches import MatchesRepo
 from footy.repo.ops import OpsRepo
 from footy.repo.ports import Database
@@ -172,9 +172,51 @@ def _unmapped_events(ops: OpsRepo, at: str, unmapped: Counter[str], origin: str)
         )
 
 
+def _anomaly_key(anomaly: Anomaly) -> str:
+    ids = anomaly.detail.get("fd_match_ids")
+    ident = (
+        ",".join(str(i) for i in ids)
+        if isinstance(ids, list)
+        else anomaly.detail.get("fd_match_id")
+    )
+    return f"anomaly:{anomaly.kind}:{ident}"
+
+
 def _anomaly_events(ops: OpsRepo, at: str, anomalies: Sequence[Anomaly]) -> None:
+    """One event per anomaly per 24 h: a problem that stays inside the nightly window is not
+    re-reported on every run (section 9.2)."""
     for anomaly in anomalies:
-        ops.record_event(at, "warn", SOURCE_FD_ORG, f"anomaly_{anomaly.kind}", anomaly.detail)
+        ops.record_event(
+            at,
+            "warn",
+            SOURCE_FD_ORG,
+            f"anomaly_{anomaly.kind}",
+            anomaly.detail,
+            dedupe_key=_anomaly_key(anomaly),
+        )
+
+
+def _fail_job(
+    ops: OpsRepo | None,
+    job_id: int | None,
+    client: FdOrgClient,
+    summary: dict[str, object],
+    exc: Exception,
+    now: Callable[[], str],
+) -> None:
+    """Best effort: record the failure and the fetch audit trail. If the database itself is the
+    problem these writes may fail too; that must not hide the original error."""
+    if ops is None or job_id is None:
+        return
+    try:
+        ops.log_fetches(SOURCE_FD_ORG, client.fetches)
+        ops.finish_job(job_id, now(), "failed", summary, error=str(exc))
+    except D1Error:
+        log.warning("could not record the failed job in the database")
+
+
+def _exit_code_of(exc: Exception) -> ExitCode:
+    return exc.exit_code if isinstance(exc, FootyError) else ExitCode.UNEXPECTED
 
 
 def _exit_code(collected: _Collected) -> ExitCode:
@@ -219,6 +261,11 @@ def seed_reference(
     alias_rows: list[tuple[str, str, int]] = []
     for source, table in sorted(ref.aliases.items()):
         for alias_norm, canonical in sorted(table.items()):
+            if canonical not in ids:
+                raise DataError(
+                    "the progress file does not match the database (teams are missing): "
+                    "delete the progress file and run bootstrap again"
+                )
             alias_rows.append((source, alias_norm, ids[canonical]))
     execute_resumable(db, f"{job}-aliases", repo.alias_statements(alias_rows), progress)
     return repo.counts()
@@ -276,12 +323,10 @@ def run_bootstrap(
             ops.log_fetches(SOURCE_FD_ORG, client.fetches)
             _unmapped_events(ops, now(), collected.unmapped, "bootstrap")
             _anomaly_events(ops, now(), collected.anomalies)
-    except FootyError as exc:
+    except (FootyError, D1Error) as exc:
         summary.update(_base_summary(collected))
-        if ops is not None and job_id is not None:
-            ops.log_fetches(SOURCE_FD_ORG, client.fetches)
-            ops.finish_job(job_id, now(), "failed", summary, error=str(exc))
-        return JobResult(exc.exit_code, {**summary, "error": str(exc)})
+        _fail_job(ops, job_id, client, summary, exc, now)
+        return JobResult(_exit_code_of(exc), {**summary, "error": str(exc)})
 
     summary.update(_base_summary(collected))
     code = _exit_code(collected)
@@ -331,7 +376,6 @@ def _write_matches(
 
 def run_ingest(
     client: FdOrgClient,
-    ref: ReferenceData,
     *,
     db: Database,
     today: date,
@@ -376,11 +420,10 @@ def run_ingest(
         _unmapped_events(ops, now(), collected.unmapped, "ingest")
         _anomaly_events(ops, now(), collected.anomalies)
         summary["freshness"] = MatchesRepo(db).freshness()
-    except FootyError as exc:
+    except (FootyError, D1Error) as exc:
         summary.update(_base_summary(collected))
-        ops.log_fetches(SOURCE_FD_ORG, client.fetches)
-        ops.finish_job(job_id, now(), "failed", summary, error=str(exc))
-        return JobResult(exc.exit_code, {**summary, "error": str(exc)})
+        _fail_job(ops, job_id, client, summary, exc, now)
+        return JobResult(_exit_code_of(exc), {**summary, "error": str(exc)})
 
     summary.update(_base_summary(collected))
     code = _exit_code(collected)
