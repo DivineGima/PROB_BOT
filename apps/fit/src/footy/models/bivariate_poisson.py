@@ -177,7 +177,7 @@ def fit_bivariate_poisson(
         jac=True,
         method="L-BFGS-B",
         bounds=bounds,
-        options={"maxiter": cfg.max_iterations, "ftol": 1e-12, "gtol": 1e-6},
+        options={"maxiter": cfg.max_iterations, "ftol": cfg.tolerance, "gtol": 1e-6},
     )
     if not result.success:
         raise ModelFitError(f"optimiser did not converge: {result.message}")

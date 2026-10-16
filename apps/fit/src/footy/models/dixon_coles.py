@@ -162,7 +162,7 @@ def fit_dixon_coles(
         jac=True,
         method="L-BFGS-B",
         bounds=bounds,
-        options={"maxiter": cfg.max_iterations, "ftol": 1e-12, "gtol": 1e-6},
+        options={"maxiter": cfg.max_iterations, "ftol": cfg.tolerance, "gtol": 1e-6},
     )
     theta = result.x
     if not result.success:
