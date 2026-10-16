@@ -24,7 +24,11 @@
     "Real Valladolid": ["Real Valladolid CF"],
     "Las Palmas": ["UD Las Palmas"],
     "Leganés": ["CD Leganés"],
-    "Deportivo A Coruña": ["RC Deportivo de La Coruña", "Deportivo de La Coruña", "RC Deportivo La Coruña"],
+    "Deportivo A Coruña": [
+      "RC Deportivo de La Coruña",
+      "Deportivo de La Coruña",
+      "RC Deportivo La Coruña"
+    ],
     "Málaga": ["Málaga CF"],
     "Racing Santander": ["Racing de Santander", "Real Racing Club de Santander"],
     "Cádiz": ["Cádiz CF"],
