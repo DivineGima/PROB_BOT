@@ -203,3 +203,63 @@ def test_the_argument_parser_requires_a_command() -> None:
     with pytest.raises(SystemExit) as info:
         main([], env=GOOD_ENV)
     assert info.value.code == 2
+
+
+# -- Stage 3: the backtest command ---------------------------------------------------------------
+
+
+def _seeded_db() -> SqliteD1:
+    from tests.db_seed import seed_world
+    from tests.synthetic import generate_world
+
+    db = SqliteD1()
+    seed_world(db, generate_world(seed=21, n_leagues=3, teams_per_league=10, seasons=3))
+    return db
+
+
+D1_ONLY_ENV = {
+    k: v for k, v in GOOD_ENV.items() if k in ("CF_ACCOUNT_ID", "D1_DATABASE_ID", "CF_D1_TOKEN")
+}
+
+
+def test_backtest_needs_only_the_database_not_the_football_data_gate(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    report = tmp_path / "out" / "backtest.txt"
+    code, out = run(
+        ["backtest", "--test-days", "90", "--fold-days", "45", "--out", str(report)],
+        capsys,
+        env=D1_ONLY_ENV,
+        db=_seeded_db(),
+    )
+    assert code == 0
+    summary = json.loads(out)
+    assert summary["result"]["models"]["dc"]["beats_baseline"] is True
+    assert "cf-secret-token" not in out
+    assert "baseline" in report.read_text(encoding="utf-8")
+
+
+def test_backtest_rejects_unknown_models_and_bad_numbers(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code, out = run(["backtest", "--models", "nope"], capsys, env=D1_ONLY_ENV, db=SqliteD1())
+    assert code == 2 and "unknown model" in json.loads(out)["error"]
+    code, out = run(["backtest", "--half-lives", "abc"], capsys, env=D1_ONLY_ENV, db=SqliteD1())
+    assert code == 2 and "--half-lives" in json.loads(out)["error"]
+    code, out = run(["backtest", "--shrinks", "0"], capsys, env=D1_ONLY_ENV, db=SqliteD1())
+    assert code == 2 and "positive" in json.loads(out)["error"]
+
+
+def test_backtest_on_an_empty_database_exits_with_a_data_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code, out = run(["backtest"], capsys, env=D1_ONLY_ENV, db=SqliteD1())
+    assert code == 2 and "bootstrap" in json.loads(out)["error"]
+
+
+def test_backtest_without_the_database_settings_is_a_config_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    code = main(["backtest"], env={})
+    assert code == 2
+    assert "CF_ACCOUNT_ID" in json.loads(capsys.readouterr().out)["error"]
