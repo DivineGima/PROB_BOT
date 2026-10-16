@@ -1,0 +1,8 @@
+* text=auto
+
+# shell scripts and git hooks must keep LF endings or `sh` fails on Windows checkouts
+scripts/hooks/* text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sql text eol=lf
