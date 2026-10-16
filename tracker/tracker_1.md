@@ -209,3 +209,21 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 |---|---|
 | Stage 1: Foundations and CPU spike | **in-progress** (deployed; CPU gate failed after F1, awaiting Divine's decision) |
 | Stages 2 to 7 | not started |
+
+---
+
+## 2026-10-16 (late night) — Stage 1 closed; Divine chose pre-computed grids (Stage 1 complete)
+
+- **Built against:** `PRD_1.md`, `system_architecture_1.md`, `system_architecture_essential_1.md` (all N=1).
+- **Decision (Divine, this session):** the CPU gate failed after F1 (p95 16 ms, max 22 ms; PR #8), and Divine chose the parked **nightly pre-computed grids** option. F2, F3 and the paid plan are not adopted. This changes the architecture (the nightly job stores per-match grids; the Worker looks them up and the TypeScript grid port in the Worker goes away), so it needs a **PRD bump and a new architecture version made in design chat (System Designer)**. Nothing in the Worker has been changed for it. Until those files exist, `essential_1` stays the scope and the version-alignment check stays N=1.
+- **Done:** PR #8 merged (CPU gate result after F1). This session's PR switches `SPIKE_ENABLED` back to `"0"` in `apps/bot/wrangler.toml` and rewrites `docs/setup.md` C8 to the current method. The spike code stays in place, deprecated, not deleted (extensibility rule).
+- **Stage 1 exit criteria (essentials step 9):** CI green on `main`; Worker deployed; webhook rejects bad requests and acks good ones; migration `0001` applied to the real D1; CPU measurement recorded (`docs/verification.md` section 2); this entry written. All met.
+- **Carried over, not blocking Stage 2:** live D1 probe (verify item 3; needs the nightly token in Divine's shell); architecture inventory gap (`TELEGRAM_WEBHOOK_SECRET` and `WORKER_URL` as GitHub secrets, for the next snapshot); the `claude.md` in-place-edit exception; missing `SYETEM DESIGN RULES.html`; git identity.
+- **For the design chat:** the pre-computed grids change should cover where grids are stored (D1 table and size against the free storage and row limits), how many days of fixtures, what the Worker does when a grid is missing (fallback), how grids relate to the first-prediction-immutable rule, and the golden-vector rule for numerics (Python becomes the only grid implementation).
+
+### Module status
+| Module | Status |
+|---|---|
+| Stage 1: Foundations and CPU spike | **complete** |
+| Stage 2: Ingestion, aliases and bootstrap | not started (legal gate: register unsigned, A-1 undecided, `data/historical_teams.json` missing) |
+| Stages 3 to 7 | not started (Stages 5 and 7 are affected by the pre-computed grids decision) |

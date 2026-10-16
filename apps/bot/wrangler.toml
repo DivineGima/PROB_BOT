@@ -10,7 +10,7 @@ enabled = true
 #   TELEGRAM_WEBHOOK_SECRET, WEBHOOK_PATH_SECRET, ALLOWED_CHAT_ID, ALLOWED_USER_ID
 # SPIKE_ENABLED is a plain var for the Stage 1 CPU spike path; it is off unless set to "1".
 [vars]
-SPIKE_ENABLED = "1" # TEMPORARY for the Stage 1 CPU gate (docs/setup.md C8); set back to "0" right after
+SPIKE_ENABLED = "0" # the Stage 1 CPU gate is recorded (docs/verification.md section 2); set to "1" only to re-measure
 
 [[d1_databases]]
 binding = "DB"

@@ -87,13 +87,12 @@ Open https://github.com/DivineGima/PROB_BOT/settings/secrets/actions and click *
 3. Merge it. `deploy.yml` then runs on `main`: guard, migration `0001`, deploy, webhook registration, smoke. Watch it at https://github.com/DivineGima/PROB_BOT/actions
 4. Check the first deploy: send any message to your bot in Telegram (it stays silent in Stage 1, which is correct), then confirm the smoke step is green.
 
-### C8. CPU gate (decides whether the design stands)
-1. Make a short pull request that sets `SPIKE_ENABLED = "1"` in `apps/bot/wrangler.toml`, merge it, and wait for the deploy.
-2. In the repo folder run (secrets as environment variables in your shell only):
-   `node scripts/cpu-spike.mjs --n 40`
-3. Within 3 days (Free-plan log retention) open https://dash.cloudflare.com , go to **Workers & Pages > prob-bot > Observability**, export the invocation records for those 25 requests as JSON Lines, and run `node scripts/cpu-stats.mjs <file>`. Alternatively run `npx wrangler tail prob-bot --format json > tail.jsonl` while step 2 runs.
-4. Paste the result into `docs/verification.md` section 2. If p95 is above 6 ms, tell Claude Code: the F1 trims are next.
-5. Make a pull request setting `SPIKE_ENABLED` back to `"0"` and merge it.
+### C8. CPU gate (done for Stage 1; repeat only to re-measure)
+Stage 1 ran this and recorded the result in `docs/verification.md` section 2 (the gate failed; see the tracker). To re-measure later:
+1. Ask Claude Code to open a short pull request that sets `SPIKE_ENABLED = "1"` in `apps/bot/wrangler.toml`; merge it and wait for the deploy.
+2. In the repo folder, in one PowerShell window, set `WORKER_URL`, `WEBHOOK_PATH_SECRET` and `TELEGRAM_WEBHOOK_SECRET` as environment variables and run `node scripts/cpu-spike.mjs`. It must print `"http_statuses":{"200":40}`. Then remove the two secret variables from the window.
+3. Tell Claude Code. It reads the CPU times from Workers Logs (kept 3 days on the Free plan) and records them. No recording window is needed.
+4. Merge the pull request that sets `SPIKE_ENABLED` back to `"0"`.
 
 ### C9. Live D1 probe (verify-at-build item 3)
 After the first deploy, from `apps/fit/src` with the Python venv active (nightly token only in this shell):
