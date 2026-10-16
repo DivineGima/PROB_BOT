@@ -31,3 +31,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 .idea/
+
+# wrangler tail captures (contain client IPs and request details)
+tail*.jsonl

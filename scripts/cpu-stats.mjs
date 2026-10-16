@@ -45,24 +45,90 @@ export function extractCpuMs(record) {
   return null;
 }
 
-/** @param {string} text JSON Lines or a single JSON array */
+/**
+ * Reads records from any of the shapes Cloudflare tooling produces: a JSON array, JSON Lines, or the
+ * stream of multi-line (pretty-printed) objects that `wrangler tail --format json` writes. Text outside
+ * the objects (for example the "connected" banner) is ignored. `invalid` counts balanced `{...}` blocks
+ * that were not valid JSON.
+ * @param {string} text
+ */
 export function parseRecords(text) {
   const trimmed = text.trim();
   if (trimmed.startsWith("[")) {
-    return { records: /** @type {unknown[]} */ (JSON.parse(trimmed)), invalid: 0 };
+    try {
+      return { records: /** @type {unknown[]} */ (JSON.parse(trimmed)), invalid: 0 };
+    } catch {
+      // fall through to the stream scanner
+    }
   }
   /** @type {unknown[]} */
   const records = [];
   let invalid = 0;
-  for (const line of trimmed.split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    try {
-      records.push(JSON.parse(line));
-    } catch {
-      invalid += 1;
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (depth > 0 && c === '"') inString = true;
+    else if (c === "{") {
+      if (depth === 0) start = i;
+      depth += 1;
+    } else if (c === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          records.push(JSON.parse(text.slice(start, i + 1)));
+        } catch {
+          invalid += 1;
+        }
+      }
     }
   }
   return { records, invalid };
+}
+
+/**
+ * Keeps only invocations of the spike route that answered 200, so stray requests (a 401 from a wrong
+ * header, the 204 prime request, a Telegram update) never enter the statistics. Records without request
+ * details (Workers Logs exports, plain numbers) are kept.
+ * @param {unknown} record
+ */
+export function isMeasured(record) {
+  const r = /** @type {Record<string, any>} */ (record ?? {});
+  const url = r.event?.request?.url;
+  if (typeof url !== "string") return true;
+  if (!url.includes("/spike/")) return false;
+  const status = r.event?.response?.status;
+  return status === undefined || status === 200;
+}
+
+/** Number of leading requests reported separately: they run on a cold or only partly warmed isolate. */
+export const COLD_REQUESTS = 5;
+
+/**
+ * Turns raw records into the CPU series, in the order the requests happened.
+ * @param {unknown[]} records
+ */
+export function cpuSeries(records) {
+  const measured = records.filter(isMeasured);
+  const withTime = measured.filter(
+    (r) => typeof (/** @type {any} */ (r).eventTimestamp) === "number",
+  );
+  const ordered =
+    withTime.length === measured.length
+      ? [...measured].sort(
+          (a, b) => /** @type {any} */ (a).eventTimestamp - /** @type {any} */ (b).eventTimestamp,
+        )
+      : measured;
+  const values = /** @type {number[]} */ (ordered.map(extractCpuMs).filter((v) => v !== null));
+  return { values, excluded: records.length - measured.length };
 }
 
 /**
@@ -96,17 +162,21 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const minIdx = rest.indexOf("--min");
   const min = minIdx >= 0 ? Number(rest[minIdx + 1]) : GATE.minInvocations;
   const { records, invalid } = parseRecords(readFileSync(file, "utf8"));
-  const values = records.map(extractCpuMs).filter((v) => v !== null);
-  const skipped = records.length - values.length;
-  const s = summarise(/** @type {number[]} */ (values), { minInvocations: min });
+  const { values, excluded } = cpuSeries(records);
+  const s = summarise(values, { minInvocations: min });
+  const warm = values.length > COLD_REQUESTS + 4 ? summarise(values.slice(COLD_REQUESTS)) : null;
   console.log(
     JSON.stringify({
       n: s.n,
       p50_ms: s.p50,
       p95_ms: s.p95,
       max_ms: s.max,
-      skipped_without_cpu: skipped,
-      unparseable_lines: invalid,
+      first_requests_ms: values.slice(0, COLD_REQUESTS),
+      after_first_requests: warm
+        ? { n: warm.n, p50_ms: warm.p50, p95_ms: warm.p95, max_ms: warm.max }
+        : null,
+      other_requests_ignored: excluded,
+      unreadable_blocks: invalid,
     }),
   );
   console.log(s.verdict);

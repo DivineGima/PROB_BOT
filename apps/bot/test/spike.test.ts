@@ -179,6 +179,17 @@ describe("spike route through the Worker", () => {
     expect(await response.json()).toMatchObject({ matches: 60 });
   });
 
+  it("answers the preparation request with 204 and still measures normally afterwards", async () => {
+    const prime = await call({ headers: { ...headers, "x-spike-prime": "1" }, body: "{}" });
+    expect(prime.status).toBe(204);
+    const after = await call({ headers, body: upload(5) });
+    expect(after.status).toBe(200);
+  });
+
+  it("does not run the preparation shortcut without the secret header", async () => {
+    expect((await call({ headers: { "x-spike-prime": "1" }, body: "{}" })).status).toBe(401);
+  });
+
   it("returns 400 for an invalid payload and 413 for an oversize one", async () => {
     expect((await call({ headers, body: "{}" })).status).toBe(400);
     expect((await call({ headers, body: "x".repeat(1024 * 1024 + 1) })).status).toBe(413);
