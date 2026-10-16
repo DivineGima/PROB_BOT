@@ -7,9 +7,6 @@ export const GRID_SIZE = 13;
 export const CELLS = GRID_SIZE * GRID_SIZE;
 export const OVER_LINES = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5] as const;
 
-const LOG_FACT = new Float64Array(GRID_SIZE);
-for (let n = 1; n < GRID_SIZE; n++) LOG_FACT[n] = (LOG_FACT[n - 1] ?? 0) + Math.log(n);
-
 export type Grid = Float64Array;
 
 export interface Markets {
@@ -19,11 +16,14 @@ export interface Markets {
   overs: number[];
 }
 
+/** Poisson pmf for k = 0..12 by the recurrence p[k] = p[k-1] * lambda / k: one exp, no factorial table. */
 function poissonPmf(lambda: number): Float64Array {
   const pmf = new Float64Array(GRID_SIZE);
-  const logLambda = Math.log(lambda);
-  for (let k = 0; k < GRID_SIZE; k++) {
-    pmf[k] = Math.exp(-lambda + k * logLambda - (LOG_FACT[k] ?? 0));
+  let term = Math.exp(-lambda);
+  pmf[0] = term;
+  for (let k = 1; k < GRID_SIZE; k++) {
+    term = (term * lambda) / k;
+    pmf[k] = term;
   }
   return pmf;
 }

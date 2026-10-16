@@ -1,5 +1,5 @@
 import { MAX_SPIKE_BODY_BYTES } from "../config/constants";
-import { primeBlobs, runWorkload, SpikeInputError } from "./workload";
+import { primeModels, runWorkload, SpikeInputError } from "./workload";
 
 /**
  * Stage 1 CPU spike endpoint (ADR-013). Reached only through `auth` (path + header) and only
@@ -13,7 +13,7 @@ import { primeBlobs, runWorkload, SpikeInputError } from "./workload";
 export async function handleSpike(request: Request): Promise<Response> {
   // Preparation call from the driver: build the synthetic model data, do no measured work.
   if (request.headers.get("x-spike-prime") === "1") {
-    primeBlobs();
+    primeModels();
     return new Response(null, { status: 204 });
   }
 
