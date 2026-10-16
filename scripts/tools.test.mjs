@@ -291,6 +291,33 @@ describe("smoke", () => {
     );
   });
 
+  it("accepts the spike path answering 401 while the spike is deliberately enabled, but not 200", async () => {
+    const spikeOn = /** @type {typeof fetch} */ (
+      async (url, init) =>
+        new URL(String(url)).pathname.startsWith("/spike/")
+          ? new Response(null, { status: 401 })
+          : goodWorker(url, init)
+    );
+    const on = await runSmoke({ workerUrl: origin, pathSecret: PATH_SECRET, fetchImpl: spikeOn });
+    assert.deepEqual(
+      on.filter((c) => !c.ok),
+      [],
+    );
+
+    const spikeOpen = /** @type {typeof fetch} */ (
+      async (url, init) =>
+        new URL(String(url)).pathname.startsWith("/spike/")
+          ? new Response("{}", { status: 200 })
+          : goodWorker(url, init)
+    );
+    const open = await runSmoke({
+      workerUrl: origin,
+      pathSecret: PATH_SECRET,
+      fetchImpl: spikeOpen,
+    });
+    assert.equal(open.filter((c) => !c.ok).length, 1);
+  });
+
   it("never puts a secret in a check name or detail", async () => {
     const checks = await runSmoke({
       workerUrl: origin,
