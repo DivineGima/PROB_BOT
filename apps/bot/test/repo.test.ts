@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createRepositories } from "../src/repo";
+import { createRepositories, payloadVerifies, sha256Hex } from "../src/repo";
 
 let now = new Date("2026-10-16T08:00:00Z");
 const repos = () => createRepositories(env.DB, () => now);
@@ -11,22 +11,30 @@ beforeEach(async () => {
     env.DB.prepare("DELETE FROM processed_updates"),
     env.DB.prepare("DELETE FROM uploads"),
     env.DB.prepare("DELETE FROM events"),
+    env.DB.prepare("DELETE FROM active_run"),
+    env.DB.prepare("DELETE FROM team_form"),
+    env.DB.prepare("DELETE FROM model_params"),
+    env.DB.prepare("DELETE FROM model_runs"),
   ]);
 });
 
-describe("migrations 0001 and 0002", () => {
-  it("create exactly the Stage 1 and Stage 2 tables, no later-stage ones (ADR-033)", async () => {
+describe("migrations 0001 to 0003", () => {
+  it("create exactly the Stage 1, 2 and 4 tables, no later-stage ones (ADR-033)", async () => {
     const { results } = await env.DB.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name <> 'd1_migrations' ORDER BY name",
     ).all<{ name: string }>();
     expect(results.map((r) => r.name)).toEqual([
+      "active_run",
       "competitions",
       "events",
       "job_runs",
       "matches",
+      "model_params",
+      "model_runs",
       "processed_updates",
       "source_fetch_log",
       "team_aliases",
+      "team_form",
       "teams",
       "uploads",
     ]);
@@ -192,5 +200,96 @@ describe("EventRepository.record dedupe", () => {
     await repos().events.record({ level: "info", source: "bot", kind: "k" });
     await repos().events.record({ level: "info", source: "bot", kind: "k" });
     expect(await count()).toBe(4);
+  });
+});
+
+describe("RunRepository.readActive (Stage 4: a promoted run is readable through the Worker repo)", () => {
+  const insertRun = (runId: string, status: string) =>
+    env.DB.prepare(
+      `INSERT INTO model_runs (run_id, status, started_at, data_cutoff_utc, config_json, ensemble_json)
+       VALUES (?1, ?2, '2026-10-16T01:17:00Z', '2026-10-15', '{"unvalidated":true}', '{"weights":{"dc":1}}')`,
+    ).bind(runId, status);
+
+  const insertParams = async (runId: string, model: string, payload: string) =>
+    env.DB.prepare(
+      `INSERT INTO model_params (run_id, model, status, payload_version, payload_json, payload_sha256)
+       VALUES (?1, ?2, 'ok', 1, ?3, ?4)`,
+    )
+      .bind(runId, model, payload, await sha256Hex(payload))
+      .run();
+
+  it("returns null before anything is published", async () => {
+    await insertRun("R1", "building").run();
+    expect(await repos().runs.readActive()).toBeNull();
+  });
+
+  it("reads the run the pointer names, with its models, and nothing from other runs", async () => {
+    await insertRun("R1", "superseded").run();
+    await insertRun("R2", "active").run();
+    await insertParams("R1", "dc", '{"payload_version":1,"teams":{}}');
+    await insertParams("R2", "dc", '{"payload_version":1,"teams":{"1":[0.1,0.2,"EPL"]}}');
+    await insertParams("R2", "pi", '{"payload_version":1,"teams":{}}');
+    await env.DB.prepare(
+      "INSERT INTO model_params (run_id, model, status, error) VALUES ('R2', 'bp', 'failed', 'x')",
+    ).run();
+    await env.DB.prepare(
+      "INSERT INTO active_run (id, run_id, activated_at) VALUES (1, 'R2', '2026-10-16T01:30:00Z')",
+    ).run();
+
+    const run = await repos().runs.readActive();
+    expect(run).not.toBeNull();
+    expect(run?.runId).toBe("R2");
+    expect(run?.activatedAt).toBe("2026-10-16T01:30:00Z");
+    expect(run?.dataCutoffUtc).toBe("2026-10-15");
+    expect(JSON.parse(run?.ensembleJson ?? "{}")).toEqual({ weights: { dc: 1 } });
+    expect(run?.params.map((p) => [p.model, p.status])).toEqual([
+      ["bp", "failed"],
+      ["dc", "ok"],
+      ["pi", "ok"],
+    ]);
+    expect(run?.params.find((p) => p.model === "bp")?.error).toBe("x");
+    const dc = run?.params.find((p) => p.model === "dc");
+    expect(dc?.payloadJson).toContain('"1":[0.1,0.2,"EPL"]');
+    expect(dc && (await payloadVerifies(dc))).toBe(true);
+  });
+
+  it("follows the pointer when it moves (rollback) and sees nothing half-published", async () => {
+    await insertRun("R1", "superseded").run();
+    await insertRun("R2", "active").run();
+    await insertParams("R1", "dc", '{"payload_version":1,"v":"old"}');
+    await insertParams("R2", "dc", '{"payload_version":1,"v":"new"}');
+    await env.DB.prepare(
+      "INSERT INTO active_run (id, run_id, activated_at) VALUES (1, 'R2', 't')",
+    ).run();
+    expect((await repos().runs.readActive())?.params[0]?.payloadJson).toContain("new");
+    await env.DB.prepare("UPDATE active_run SET run_id = 'R1' WHERE id = 1").run();
+    const back = await repos().runs.readActive();
+    expect(back?.runId).toBe("R1");
+    expect(back?.params[0]?.payloadJson).toContain("old");
+  });
+
+  it("detects a corrupted payload and rejects failed or incomplete rows", async () => {
+    const text = '{"payload_version":1}';
+    const good = {
+      model: "dc",
+      status: "ok",
+      payloadVersion: 1,
+      payloadJson: text,
+      error: null,
+    } as const;
+    expect(await payloadVerifies({ ...good, payloadSha256: await sha256Hex(text) })).toBe(true);
+    expect(await payloadVerifies({ ...good, payloadSha256: await sha256Hex(`${text} `) })).toBe(
+      false,
+    );
+    expect(await payloadVerifies({ ...good, payloadSha256: null })).toBe(false);
+    expect(await payloadVerifies({ ...good, payloadJson: null, payloadSha256: "x" })).toBe(false);
+    expect(await payloadVerifies({ ...good, status: "failed", payloadSha256: "x" })).toBe(false);
+  });
+
+  it("computes SHA-256 the same way the fit job does", async () => {
+    // sha256("abc"), the standard test vector; Python's hashlib gives the same digest
+    expect(await sha256Hex("abc")).toBe(
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    );
   });
 });

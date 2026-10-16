@@ -16,6 +16,8 @@ on:
           - ingest
           - d1-probe
           - backtest
+          - fit
+          - publish
       seasons:
         description: "Seasons for bootstrap, newest first (1 to 10)"
         type: string
@@ -26,6 +28,11 @@ on:
         type: string
         required: false
         default: "365"
+      models:
+        description: "Backtest: comma-separated models (dc, pi, bp); use one sweep point with several"
+        type: string
+        required: false
+        default: "dc"
       half_lives:
         description: "Backtest: comma-separated time-decay half-lives to sweep (days)"
         type: string
@@ -67,6 +74,7 @@ jobs:
           COMMAND: ${{ inputs.command }}
           SEASONS: ${{ inputs.seasons }}
           TEST_DAYS: ${{ inputs.test_days }}
+          MODELS: ${{ inputs.models }}
           HALF_LIVES: ${{ inputs.half_lives }}
           SHRINKS: ${{ inputs.shrinks }}
           PYTHONPATH: src
@@ -82,7 +90,9 @@ jobs:
             bootstrap-dry-run) python -m footy.cli bootstrap --dry-run --seasons "$SEASONS" ;;
             bootstrap)         python -m footy.cli bootstrap --seasons "$SEASONS" ;;
             ingest)            python -m footy.cli ingest ;;
+            fit)               python -m footy.cli fit ;;
+            publish)           python -m footy.cli publish ;;
             d1-probe)          python -m footy.repo.d1_probe ;;
-            backtest)          python -m footy.cli backtest --test-days "$TEST_DAYS" --half-lives "$HALF_LIVES" --shrinks "$SHRINKS" ;;
+            backtest)          python -m footy.cli backtest --models "$MODELS" --test-days "$TEST_DAYS" --half-lives "$HALF_LIVES" --shrinks "$SHRINKS" ;;
             *) echo "unknown command" >&2; exit 64 ;;
           esac

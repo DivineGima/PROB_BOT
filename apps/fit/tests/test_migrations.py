@@ -12,6 +12,7 @@ import pytest
 MIGRATIONS = Path(__file__).resolve().parents[3] / "db" / "migrations"
 STAGE_1_TABLES = {"events", "job_runs", "processed_updates", "uploads"}
 STAGE_2_TABLES = {"competitions", "teams", "team_aliases", "matches", "source_fetch_log"}
+STAGE_4_TABLES = {"model_runs", "active_run", "model_params", "team_form"}
 
 
 def migration_files() -> list[Path]:
@@ -44,19 +45,19 @@ def test_migration_files_are_sequential_and_named() -> None:
         assert name.startswith(f"{index:04d}_"), f"gap or misnumbering at {name}"
 
 
-def test_applies_cleanly_to_an_empty_database_and_creates_only_stage_1_and_2_tables(
+def test_applies_cleanly_to_an_empty_database_and_creates_only_stage_1_2_and_4_tables(
     db: sqlite3.Connection,
 ) -> None:
     apply(db, migration_files())
-    assert tables(db) >= STAGE_1_TABLES | STAGE_2_TABLES
+    assert tables(db) >= STAGE_1_TABLES | STAGE_2_TABLES | STAGE_4_TABLES
     # ADR-033: later-stage tables must not exist yet.
-    assert not {"predictions", "omissions", "model_runs", "active_run", "model_params"} & tables(db)
+    assert not {"predictions", "omissions", "calibration_snapshots"} & tables(db)
 
 
 def test_applies_step_by_step_on_top_of_the_previous_schema(db: sqlite3.Connection) -> None:
     for path in migration_files():
         apply(db, [path])
-    assert tables(db) >= STAGE_1_TABLES | STAGE_2_TABLES
+    assert tables(db) >= STAGE_1_TABLES | STAGE_2_TABLES | STAGE_4_TABLES
 
 
 def test_uploads_defaults_to_received_and_checks_status(db: sqlite3.Connection) -> None:
@@ -150,3 +151,43 @@ def test_matches_rules_in_the_schema(db: sqlite3.Connection) -> None:
     assert db.execute("SELECT COUNT(*) FROM matches").fetchone() == (
         3,
     )  # several NULL fd ids are fine
+
+
+def test_stage_4_registry_rules_in_the_schema(db: sqlite3.Connection) -> None:
+    apply(db, migration_files())
+    db.execute("INSERT INTO model_runs (run_id, status, started_at) VALUES ('R1', 'building', 't')")
+    with pytest.raises(sqlite3.IntegrityError):  # status outside the state machine
+        db.execute("INSERT INTO model_runs (run_id, status, started_at) VALUES ('R2', 'live', 't')")
+    # exactly one active_run row, and it must point at a real run
+    db.execute("INSERT INTO active_run (id, run_id, activated_at) VALUES (1, 'R1', 't')")
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute("INSERT INTO active_run (id, run_id, activated_at) VALUES (2, 'R1', 't')")
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute("UPDATE active_run SET run_id = 'missing' WHERE id = 1")
+    # model_params: known model names, and an ok row must carry its payload and hash
+    ok = (
+        "INSERT INTO model_params (run_id, model, status, payload_version, payload_json, "
+        "payload_sha256) VALUES ('R1', ?, 'ok', 1, '{}', 'h')"
+    )
+    db.execute(ok, ("dc",))
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(ok, ("dc",))  # one row per (run, model)
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(ok, ("xx",))
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute("INSERT INTO model_params (run_id, model, status) VALUES ('R1', 'pi', 'ok')")
+    db.execute(
+        "INSERT INTO model_params (run_id, model, status, error) VALUES ('R1', 'pi', 'failed', 'x')"
+    )
+    with pytest.raises(sqlite3.IntegrityError):  # a run that does not exist
+        db.execute("INSERT INTO model_params (run_id, model, status) VALUES ('R9', 'bp', 'failed')")
+    # team_form: one row per (run, team), shots columns optional
+    db.execute("INSERT INTO teams (canonical_name) VALUES ('A')")
+    form = (
+        "INSERT INTO team_form (run_id, team_id, n_training, n_season, l10_n) "
+        "VALUES ('R1', 1, 0, 0, 0)"
+    )
+    db.execute(form)
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(form)
+    assert db.execute("SELECT shots_n, season_sf FROM team_form").fetchone() == (None, None)

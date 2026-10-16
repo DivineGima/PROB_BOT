@@ -13,7 +13,7 @@ What was verified, how, and what is still open. Numbers marked **indicative** ar
 | 5 | GitHub branch protection and environments on a private Free repo; 60-day auto-disable | **Branch protection and deployment protection: not available** for private repos on Free (search of GitHub docs, secondary sources agree). **Compensating controls are wired:** committed `pre-push` hook (tested against a real `git push`), `deploy.yml` merged-PR guard, `CF_DEPLOY_TOKEN` referenced only from `deploy.yml`. 60-day auto-disable: documented for public repos only; confirm once at the Stage 7 schedule check | `scripts/hooks/pre-push`, `scripts/verify-merged-pr.mjs`, `.github/workflows/deploy.yml` |
 | 6 | soccernews.com terms | **Checked.** Personal, non-commercial use only; the system never reads the site | Register section 3 |
 | 7 | Worker CPU of the real engine (ADR-013 spike) | **Measured in production: gate failed.** p95 22 ms, then 16 ms after the F1 trims (p50 3 ms, max 22 ms). Divine chose pre-computed grids (architecture ADR-037) | Section 2 |
-| 8 | Pi-rating constants | Stage 4 | none |
+| 8 | Pi-rating constants | **Verified in Stage 4 (2026-10-17), with one caveat**: lambda 0.035, gamma 0.7, b 10, c 3, psi(e) = 3 log10(1+e), every team starts at 0. See section 6 | Section 6 |
 
 Other facts found while building (re-verify, limits change):
 - D1 Free daily row read and write limits have been **hard-enforced since 2026-09-01**: queries fail until 00:00 UTC. The client raises `D1QuotaError` and does not retry.
@@ -98,3 +98,33 @@ Mutation checks done by hand (each breaks one behavior and the suite must fail):
 - **Golden vectors** live in `packages/contracts/golden/dc_grid_v1.json` (synthetic inputs, 169 cells, markets). Regenerate with `python -m footy.models.golden --write` from `apps/fit` with `PYTHONPATH=src`, then `npx biome format --write packages/contracts/golden`. `--check` (and a pytest) fails when the file differs from the code by more than 1e-12.
 - **Running the backtest on the real data:** Actions, workflow `data`, command `backtest` (inputs `test_days`, `half_lives`, `shrinks`; defaults 365 days and a 3 x 3 sweep). The readable report is in the job log, the JSON summary is stored in `job_runs.summary_json` (kind `backtest`). The numbers it prints are **tuning on history, not validation**: the sweep picks starting values on the same matches it scores.
 - **Real backtest result: PENDING** (the workflow runs only from `main`, so it needs this change merged). Fill in here after the run: test period, matches forecast, RPS of Dixon-Coles vs baseline, per-competition table, chosen half-life and shrinkage.
+
+## 6. Stage 4: pi-rating constants (verify-at-build item 8), the models and the registry
+
+**Pi-rating (Constantinou and Fenton, 2013, *J. Quantitative Analysis in Sports* 9(1), 37-50, doi 10.1515/jqas-2012-0036).** Read from the author's own PDF (`constantinou.info/downloads/papers/pi-ratings.pdf`) and cross-checked:
+
+| Item | Value | Where it was confirmed |
+|---|---|---|
+| Initial rating of a new team | 0 ("the average team") | Paper section 2, text |
+| Two ratings per team (home, away); one catch-up learning rate between them, one learning rate for new results | yes | Paper sections 2 and 3, text |
+| Optimal learning rates on five EPL seasons | **lambda = 0.035, gamma = 0.7** | CRAN `piratings` package defaults (0.035 / 0.7) and the author's 2022 paper (Constantinou, arXiv 2003.09384), which cites "lambda=0.035 and gamma=0.7" from the 2013 paper |
+| Error weighting | **psi(e) = 3 x log10(1 + e)** | The 2022 paper restates it as the 2013 function; the 2013 paper describes it as diminishing the weight of large goal differences |
+| Expected goal difference against the average opponent | sign(R) x (b^(\|R\|/c) - 1), **b = 10, c = 3** | CRAN `piratings` defaults (b 10, c 3) and the paper's prose ("b is the base of the logarithm"). The paper's worked example (4-1 win, both teams' ratings fall because a bigger win was expected) matches this form |
+| Update (home X, away Y) | H_X += lambda x psi_H; A_X += gamma x (change in H_X); A_Y += lambda x psi_A; H_Y += gamma x (change in A_Y), with psi_H = +psi(e) if the home side beat the predicted difference and -psi(e) otherwise, and psi_A = -psi_H | 2022 paper restates the structure; 2013 paper text lists the same four steps |
+
+**Caveat.** In the PDF the equations are set in a symbol font and did not survive text extraction, so the exact formulas were not read as equations from the 2013 paper. The structure and constants come from its prose, the author's 2022 restatement and the maintained R implementation, and they agree with each other. My earlier recollection of "lambda 0.06, gamma 0.5" was wrong and is not used. The constants are tested against hand-computed updates (`tests/test_pi_rating.py`).
+
+**Rating to grid (a hypothesis, GR-07 and ADR-006).** The paper predicts goal DIFFERENCES. The grid needs two rates, so: `lambda_home = max(0.05, (T + d)/2)`, `lambda_away = max(0.05, (T - d)/2)` with `T` the competition's recent mean total goals and `d = s x gD`. The scale `s` is fitted on the training window by regressing observed on predicted differences through the origin (clipped to 0.2..2). The backtest decides whether this is any good.
+
+**Bivariate Poisson.** The analytic gradient uses the identity dP(x,y)/dlambda1 = P(x-1,y) - P(x,y) (likewise lambda2; lambda3 uses P(x-1,y-1)); checked against finite differences. A synthetic fit of 30 teams over 8 seasons (about 3,400 matches) takes 7 to 8 s, so a production-sized fit may take about 20 s. On data generated from a bivariate Poisson it recovers team strengths about as well as Dixon-Coles does (correlation 0.91 vs 0.91) and the covariance within 0.02 to 0.03 of the truth (slightly low, from shrinkage).
+
+**Ensemble weights.** `w = n/(n+50) x softmax(-kappa x mean RPS) + 50/(n+50) x prior`, with kappa = 100 (RPS differences between models are around 0.001 to 0.01, so a softmax with kappa 1 would be almost flat). The specification shrinks toward equal weights; until scored predictions exist it also says the initial weights come from the backtest, so `prior` is the backtest softmax when a `backtest` job summary exists in `job_runs` and equal weights otherwise. With no backtest this is exactly the specification. kappa, the 200-prediction window and the pseudo-count 50 are starting values, unvalidated.
+
+**Promotion gate.** Structural checks plus the stability guard of ADR-030 (a bound of 0.5 on any team value, unvalidated). Both required fixtures are tested end to end: a corrupted run (payload altered, hash no longer matches) and a jumped-parameters run (one team moved by 2.0 with a valid hash) are rejected, recorded as `rejected` with every reason, and the previous run stays active. Every active team must have a `team_form` row (teams with no matches, such as the dropped Scottish clubs, get `n_training = 0`), otherwise the 95% coverage check could never pass.
+
+**Atomicity.** Promotion is one batch of three guarded statements. D1's batch atomicity is documented but still not tested against the live service (item 3); the tests prove the guards hold on SQLite, including a failure injected mid-promotion.
+
+**Operations (manual until `nightly.yml` exists in Stage 7).** Actions, workflow `data`: `backtest` (set `models` to `dc,pi,bp` and a single half-life and shrinkage for the full comparison), then `fit`, then `publish`. **Rollback:** `python -m footy.cli publish --rollback RUN_ID` (the workflow's `publish` command does not expose it; run it from a shell with the D1 token, or ask Claude Code to add a workflow input). Only a `superseded` run still inside the newest 30 can be rolled back to.
+
+**Real results: PENDING.** Backtest comparison of the three models, the ensemble and the baseline on the production data, and the first real `fit` and `publish`, need this change merged (the workflow runs only from `main`). Record them here.
+

@@ -2,7 +2,8 @@
  * The ONLY module in the Worker that touches D1 (architecture sections 6.5 and 6.9, locked
  * Database rule). Parameterised statements only; multi-statement work goes through `batch()`.
  * Stage 1 ships the skeleton: update dedupe, the upload record (inserted as `received` first,
- * ADR-029) and events. Later stages add run/prediction/team repositories here.
+ * ADR-029), events and, from Stage 4, the read of the active model run. Later stages add
+ * prediction and team repositories here.
  */
 export type Clock = () => Date;
 
@@ -63,10 +64,54 @@ export interface EventRepository {
   record(event: NewEvent): Promise<void>;
 }
 
+export type ModelName = "dc" | "pi" | "bp";
+
+export interface ModelParams {
+  model: ModelName;
+  status: "ok" | "failed";
+  payloadVersion: number | null;
+  payloadJson: string | null;
+  payloadSha256: string | null;
+  error: string | null;
+}
+
+/** The run `active_run` points at, with every model row (section 8.6). */
+export interface ActiveRun {
+  runId: string;
+  activatedAt: string;
+  dataCutoffUtc: string | null;
+  configJson: string;
+  ensembleJson: string;
+  params: ModelParams[];
+}
+
+export interface RunRepository {
+  /**
+   * One consistent read keyed through the pointer, so a half-published run is never seen
+   * (section 8.6 step 4). Null when nothing has been published yet.
+   */
+  readActive(): Promise<ActiveRun | null>;
+}
+
 export interface Repositories {
   updates: UpdateRepository;
   uploads: UploadRepository;
   events: EventRepository;
+  runs: RunRepository;
+}
+
+/** Lower-case hex SHA-256 of the text's UTF-8 bytes, the form `model_params.payload_sha256` uses. */
+export async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** True only for an `ok` row whose stored hash matches its payload text (integrity on read). */
+export async function payloadVerifies(params: ModelParams): Promise<boolean> {
+  if (params.status !== "ok" || params.payloadJson === null || params.payloadSha256 === null) {
+    return false;
+  }
+  return (await sha256Hex(params.payloadJson)) === params.payloadSha256;
 }
 
 const toIso = (date: Date): string => `${date.toISOString().slice(0, 19)}Z`;
@@ -176,5 +221,57 @@ export function createRepositories(db: D1Database, clock: Clock = () => new Date
     },
   };
 
-  return { updates, uploads, events };
+  const runs: RunRepository = {
+    async readActive() {
+      // A batch is one transaction, so the run row and its parameters come from the same state.
+      const [runResult, paramResult] = await db.batch([
+        db.prepare(
+          `SELECT r.run_id, r.data_cutoff_utc, r.config_json, r.ensemble_json, a.activated_at
+           FROM active_run a JOIN model_runs r ON r.run_id = a.run_id
+           WHERE a.id = 1`,
+        ),
+        db.prepare(
+          `SELECT model, status, payload_version, payload_json, payload_sha256, error
+           FROM model_params
+           WHERE run_id = (SELECT run_id FROM active_run WHERE id = 1)
+           ORDER BY model`,
+        ),
+      ]);
+      const run = runResult?.results[0] as
+        | {
+            run_id: string;
+            data_cutoff_utc: string | null;
+            config_json: string | null;
+            ensemble_json: string | null;
+            activated_at: string;
+          }
+        | undefined;
+      if (!run) return null;
+      const rows = (paramResult?.results ?? []) as Array<{
+        model: ModelName;
+        status: "ok" | "failed";
+        payload_version: number | null;
+        payload_json: string | null;
+        payload_sha256: string | null;
+        error: string | null;
+      }>;
+      return {
+        runId: run.run_id,
+        activatedAt: run.activated_at,
+        dataCutoffUtc: run.data_cutoff_utc,
+        configJson: run.config_json ?? "{}",
+        ensembleJson: run.ensemble_json ?? "{}",
+        params: rows.map((r) => ({
+          model: r.model,
+          status: r.status,
+          payloadVersion: r.payload_version,
+          payloadJson: r.payload_json,
+          payloadSha256: r.payload_sha256,
+          error: r.error,
+        })),
+      };
+    },
+  };
+
+  return { updates, uploads, events, runs };
 }

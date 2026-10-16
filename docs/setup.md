@@ -108,6 +108,14 @@ Everything runs in GitHub with the stored secrets; you paste nothing. Open https
 4. `ingest`: the nightly job's data step (last 7 days and next 3). Safe to run again.
 5. `d1-probe` (optional, any time): the live D1 check from C9.
 
+### C12. Model runs (Stage 3 and 4)
+Same page as C11, commands in this order (after `ingest` has run at least once):
+1. `backtest`: walk-forward evaluation against the league-frequency baseline. Defaults are a 365-day test period and a 3 x 3 sweep for Dixon-Coles only (a few minutes). For the full comparison set `models` to `dc,pi,bp` and `half_lives` / `shrinks` to one value each (about 10 to 20 minutes). The readable report is in the job log.
+2. `fit`: fits dc, pi and bp, weights the ensemble, snapshots `team_form` and writes a `building` run. A model that fails is stored as failed with its reason (exit code 4); the others still run.
+3. `publish`: runs the promotion gate and, if it passes, makes the run active. A rejected run leaves the previous run active and writes an `alert` event.
+
+Rollback to the previous good run (a shell with the D1 token): `python -m footy.cli publish --rollback R<id>`. Look up ids in `model_runs` (status `superseded`).
+
 ## D. Branch controls
 
 GitHub Free has no branch protection for private repos. The compensating controls are the `pre-push` hook (run `npm run hooks:install` on every machine you push from), the `deploy.yml` merged-PR guard, and the rule that only `deploy.yml` sees `CF_DEPLOY_TOKEN`. Keep working on `feat/...` or `fix/...` branches and merge through pull requests.

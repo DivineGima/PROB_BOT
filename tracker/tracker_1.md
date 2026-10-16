@@ -310,3 +310,34 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 | Stage 3: Dixon-Coles, backtest harness, metrics | code **complete**; live backtest and the baseline verdict **in-progress** |
 | Stage 4 | started on a stacked branch at Divine's request (see next entry when written) |
 | Stages 5 to 7 | not started (Stages 5 and 7 wait for the new architecture version) |
+
+---
+
+## 2026-10-17 (night) — Stage 4 built: pi-rating, bivariate Poisson, ensemble, team form, fit and publish (code complete; live runs pending)
+
+- **Built against:** `PRD_1.md`, `system_architecture_1.md`, `system_architecture_essential_1.md`, Stage 4 (all N=1). Branch `feat/stage-4-ensemble-publish`, **stacked on `feat/stage-3-dixon-coles` (PR #14)**.
+- **Process note (for Divine):** Stage 4 was started before Stage 3's live exit criterion (the real backtest) was met, because Divine asked for both stages in one session. The essentials say a stage's exit criteria come first. Nothing in Stage 4 depends on the backtest numbers except the optional initial ensemble weights, and the `fit` job reads them if they exist. Merge PR #14 first, run `backtest`, then merge this one.
+- **Done (tests green: 389 pytest, 81 Vitest; ruff, mypy strict, repo rule checks, migration lint):**
+  1. `pi_rating.py`: constants verified against the paper (verify-at-build item 8, `docs/verification.md` section 6; the recalled 0.06 / 0.5 were wrong, the paper's optimum is lambda 0.035, gamma 0.7); hand-computed update tests; rating-to-grid mapping with a fitted difference scale (hypothesis).
+  2. `bivariate_poisson.py`: Karlis-Ntzoufras, analytic gradient from the pmf-difference identity (checked against finite differences), recovery test on data generated from a bivariate Poisson.
+  3. `ensemble/`: softmax of negative recent RPS, shrunk toward the backtest prior (equal weights without one); hand-computed tests.
+  4. `form/`: `team_form` for every active team (including those with no matches, so the 95% coverage check is meaningful).
+  5. Migration `0003` (`model_runs`, `active_run`, `model_params`, `team_form`); `repo/models.py`; the Stage 2 migration test and the Worker table-list test were updated for the new tables.
+  6. `footy fit` (writes a `building` run; a failed model is stored `failed` with its reason, exit 4; all failed gives a `failed` run), `footy publish` (promotion gate: structural checks, hash re-verification, stability guard; one atomic guarded batch; supersede; prune to 30; `--rollback`); `alerts` stub writes deduped `alert` events.
+  7. Backtest now compares dc / pi / bp, the ensemble (weights from earlier folds only) and the baseline, per competition; `data.yml` gained `fit` and `publish`.
+  8. Golden vectors for all three grid builders (`packages/contracts/golden/{dc,pi,bp}_grid_v1.json`).
+  9. Worker: `RunRepository.readActive()` reads the active run through the pointer in one batch, with `payloadVerifies` (SHA-256); Vitest proves a promoted run is readable and follows a rollback (Stage 4 exit criterion).
+- **Tests required by the essentials:** corrupted-run and jumped-parameters fixtures are rejected and the old run stays active; hand-computed ensemble weights and shrinkage; pi-rating hand examples; atomic promotion with an injected failure; rollback; pruning keeps the active run.
+- **Hand mutations (17 over both stages, each caught):** the last one that first survived (building `team_form` only for teams with matches) led to a new integration test with matchless active teams.
+- **Findings:** (a) the first draft of `start_job` handling let a database outage at job start escape as an exception; the three new jobs now return a result. (b) pi-rating constants recalled from memory were wrong; checked against sources. (c) the PDF's equation glyphs did not extract; the exact formula rests on the paper's prose, the author's 2022 restatement and the R package defaults, which agree (recorded as a caveat).
+- **Open (Stage 4 exit criteria that need live data):** run `backtest` with `models=dc,pi,bp` on production, `fit`, then `publish` once, and record the numbers and the verdict (does the ensemble beat the baseline and each model; is any model worse than the baseline) in `docs/verification.md` section 6. A model that does not beat the baseline must be documented and escalated, not hidden.
+- **For the design chat (ADR-037, pre-computed grids):** the grid builders and golden vectors exist in Python only as the reference; if Python becomes the only implementation, `fit` is the place where per-match grids would be produced, but that needs PRD_2 and a new architecture version.
+
+### Module status
+| Module | Status |
+|---|---|
+| Stage 1, Stage 2 | **complete** |
+| Stage 3: Dixon-Coles, backtest harness, metrics | code **complete** (PR #14); live backtest verdict **in-progress** |
+| Stage 4: Pi-rating, bivariate Poisson, ensemble, publishing | code **complete** (stacked PR); live backtest, first `fit` and `publish` **in-progress** |
+| Stages 5 to 7 | not started (Stages 5 and 7 wait for the new architecture version) |
+

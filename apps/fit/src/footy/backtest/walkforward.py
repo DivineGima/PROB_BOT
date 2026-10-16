@@ -20,7 +20,9 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from footy.models.grid import markets
+from footy.config import MIN_TEAM_MATCHES
+from footy.ensemble.weights import ensemble_weights
+from footy.models.grid import Grid, markets, mix_grids
 from footy.models.structure import window_matches
 from footy.models.types import FitConfig, FitOutcome, LeagueMap, TrainingMatch
 from footy.scoring import (
@@ -31,7 +33,7 @@ from footy.scoring import (
     score_forecast,
 )
 
-MIN_TEAM_MATCHES = 10
+ENSEMBLE = "ensemble"  # the pooled forecast appears in results under this name
 
 Fitter = Callable[[Sequence[TrainingMatch], LeagueMap, date, FitConfig], FitOutcome]
 
@@ -42,6 +44,7 @@ class BacktestConfig:
     test_to: date
     fold_days: int = 14
     min_team_matches: int = MIN_TEAM_MATCHES
+    ensemble: bool = True  # also score the weighted linear pool when two or more models run
 
 
 @dataclass
@@ -76,6 +79,7 @@ class BacktestResult:
     skipped_unknown_team: Counter[str] = field(default_factory=Counter)
     models: dict[str, _Scores] = field(default_factory=dict)
     baseline: _Scores = field(default_factory=_Scores)
+    fold_weights: list[dict[str, float]] = field(default_factory=list)  # ensemble weights per fold
 
     def summary(self) -> dict[str, object]:
         """A JSON-safe summary: overall and per-competition means for each model and the baseline,
@@ -90,6 +94,7 @@ class BacktestResult:
             "forecast_matches": self.forecast_matches,
             "skipped_insufficient_history": self.skipped_insufficient_history,
             "fit_config": self.fit_config.as_dict(),
+            "ensemble_fold_weights": self.fold_weights,
             "fold_failures": {m: len(e) for m, e in sorted(self.fold_failures.items())},
             "baseline": _means_dict(base_overall, self.baseline.comp_means()),
             "models": {},
@@ -170,6 +175,10 @@ def run_backtest(
     result = BacktestResult(config=config, fit_config=cfg)
     for name in fitters:
         result.models[name] = _Scores()
+    use_ensemble = config.ensemble and len(fitters) > 1
+    if use_ensemble:
+        result.models[ENSEMBLE] = _Scores()
+    history: dict[str, list[float]] = {name: [] for name in fitters}  # 1X2 RPS of past forecasts
     ordered = sorted(matches, key=lambda m: m.match_date)
 
     for fold_start, fold_end in folds_for(config):
@@ -193,6 +202,15 @@ def run_backtest(
             else:
                 result.fold_failures.setdefault(name, []).append(outcome.error or "failed")
 
+        weights: dict[str, float] = {}
+        if use_ensemble and len(fitted) > 1:
+            # Weights known at the start of the fold: only forecasts already scored in EARLIER
+            # folds count, exactly as the nightly job only sees already-scored predictions.
+            weights = ensemble_weights(
+                list(fitted), history={n: history[n] for n in fitted}
+            ).weights
+            result.fold_weights.append({n: round(w, 6) for n, w in weights.items()})
+
         for m in test:
             if (
                 counts[m.home_id] < config.min_team_matches
@@ -202,21 +220,25 @@ def run_backtest(
                 continue
             base_scored = score_forecast(baseline.forecast(m.comp_code), m.goals_home, m.goals_away)
             forecasts: dict[str, ScoredForecast] = {}
+            grids: dict[str, Grid] = {}
             for name, model in fitted.items():
                 if not (model.knows(m.home_id) and model.knows(m.away_id)):
                     result.skipped_unknown_team[name] += 1
                     continue
-                forecasts[name] = score_forecast(
-                    markets(model.grid(m.home_id, m.away_id, m.comp_code)),
-                    m.goals_home,
-                    m.goals_away,
-                )
+                grids[name] = model.grid(m.home_id, m.away_id, m.comp_code)
+                forecasts[name] = score_forecast(markets(grids[name]), m.goals_home, m.goals_away)
             if not forecasts:
                 continue
+            if weights and len(grids) > 1:
+                total = sum(weights[n] for n in grids)
+                pooled = mix_grids([grids[n] for n in grids], [weights[n] / total for n in grids])
+                forecasts[ENSEMBLE] = score_forecast(markets(pooled), m.goals_home, m.goals_away)
             # The baseline is scored on exactly the matches at least one model forecast, so the
             # comparison uses the same sample.
             result.forecast_matches += 1
             result.baseline.add(m.comp_code, base_scored)
             for name, scored in forecasts.items():
                 result.models[name].add(m.comp_code, scored, base_scored.rps_1x2)
+                if name != ENSEMBLE:
+                    history[name].append(scored.rps_1x2)
     return result

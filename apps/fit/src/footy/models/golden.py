@@ -19,11 +19,14 @@ from pathlib import Path
 from footy.config import REPO_ROOT
 from footy.models.grid import (
     Grid,
+    bivariate_poisson_grid,
     clip_rate,
     dixon_coles_grid,
     feasible_rho,
+    independent_grid,
     markets,
 )
+from footy.models.pi_rating import PiParams, pi_rates
 
 GOLDEN_DIR = REPO_ROOT / "packages" / "contracts" / "golden"
 SCHEMA_VERSION = 1
@@ -41,7 +44,30 @@ def _dc(inputs: Inputs) -> tuple[dict[str, float], Grid]:
     return {"lambda_home": lam1, "lambda_away": lam2, "rho": rho}, dixon_coles_grid(lam1, lam2, rho)
 
 
-BUILDERS: dict[str, Builder] = {"dc": _dc}
+def _pi(inputs: Inputs) -> tuple[dict[str, float], Grid]:
+    """Pi-rating as the model serves it: ratings -> expected goal difference -> goal rates (the
+    mapping hypothesis of ADR-006) -> clipped -> independent Poisson grid."""
+    lam1, lam2 = pi_rates(
+        inputs["home_rating"],
+        inputs["away_rating"],
+        inputs["diff_scale"],
+        inputs["league_total"],
+        PiParams(),
+    )
+    lam1, lam2 = clip_rate(lam1), clip_rate(lam2)
+    return {"lambda_home": lam1, "lambda_away": lam2}, independent_grid(lam1, lam2)
+
+
+def _bp(inputs: Inputs) -> tuple[dict[str, float], Grid]:
+    """Bivariate Poisson as the model serves it: all three rates clipped to the supported range."""
+    lam1, lam2 = clip_rate(inputs["lambda1"]), clip_rate(inputs["lambda2"])
+    lam3 = clip_rate(inputs["lambda3"])
+    return {"lambda1": lam1, "lambda2": lam2, "lambda3": lam3}, bivariate_poisson_grid(
+        lam1, lam2, lam3
+    )
+
+
+BUILDERS: dict[str, Builder] = {"dc": _dc, "pi": _pi, "bp": _bp}
 
 INPUTS: dict[str, list[dict[str, float]]] = {
     "dc": [
@@ -54,6 +80,33 @@ INPUTS: dict[str, list[dict[str, float]]] = {
         {"lambda_home": 0.30, "lambda_away": 2.00, "rho": -0.10},  # strong away side
         {"lambda_home": 4.70, "lambda_away": 3.40, "rho": 0.087},  # rho clamped to stay feasible
         {"lambda_home": 90.0, "lambda_away": 0.001, "rho": -0.2},  # rates clipped to 6.0 / 0.01
+    ],
+    "pi": [
+        {"home_rating": 0.6, "away_rating": -0.3, "diff_scale": 0.5, "league_total": 2.8},
+        {"home_rating": 0.0, "away_rating": 0.0, "diff_scale": 0.5, "league_total": 2.6},
+        {"home_rating": -0.5, "away_rating": 0.4, "diff_scale": 0.8, "league_total": 2.7},
+        {"home_rating": 1.2, "away_rating": -1.0, "diff_scale": 0.6, "league_total": 3.1},
+        {
+            "home_rating": 3.0,
+            "away_rating": -3.0,
+            "diff_scale": 1.0,
+            "league_total": 2.5,
+        },  # floored
+        {
+            "home_rating": 0.2,
+            "away_rating": 0.1,
+            "diff_scale": 0.3,
+            "league_total": 90.0,
+        },  # clipped
+    ],
+    "bp": [
+        {"lambda1": 1.45, "lambda2": 1.10, "lambda3": 0.10},
+        {"lambda1": 1.10, "lambda2": 1.45, "lambda3": 0.10},
+        {"lambda1": 1.30, "lambda2": 1.30, "lambda3": 0.0005},  # almost no covariance
+        {"lambda1": 0.70, "lambda2": 0.60, "lambda3": 0.25},
+        {"lambda1": 2.40, "lambda2": 0.60, "lambda3": 0.15},
+        {"lambda1": 2.00, "lambda2": 2.00, "lambda3": 0.60},
+        {"lambda1": 90.0, "lambda2": 0.001, "lambda3": 9.0},  # rates clipped
     ],
 }
 

@@ -250,3 +250,33 @@ def test_report_formatting_handles_a_summary_without_models() -> None:
         {"label": "x", "baseline": {}, "models": {}, "folds": 0, "forecast_matches": 0}
     )
     assert "baseline" in text
+
+
+def test_three_models_and_the_ensemble_are_compared_with_the_baseline(
+    world: SyntheticWorld,
+) -> None:
+    config = BacktestConfig(world.as_of - timedelta(days=119), world.as_of, fold_days=60)
+    result = run_backtest(world.matches, world.leagues, fitters_for(["dc", "pi", "bp"]), config)
+    models = result.summary()["models"]
+    assert isinstance(models, dict)
+    assert set(models) == {"dc", "pi", "bp", "ensemble"}
+    rps = {name: entry["overall"]["rps_1x2"] for name, entry in models.items()}
+    # RPS is convex in the forecast, so the pooled forecast cannot score worse than the worst
+    # member when it is a convex combination of the members
+    assert rps["ensemble"] <= max(rps["dc"], rps["pi"], rps["bp"]) + 1e-12
+    assert all(entry["overall"]["n"] == models["dc"]["overall"]["n"] for entry in models.values())
+    # weights per fold: equal in the first fold (nothing scored yet), a valid pool afterwards
+    first, second = result.fold_weights
+    assert first == pytest.approx({"dc": 1 / 3, "pi": 1 / 3, "bp": 1 / 3}, abs=1e-5)
+    assert sum(second.values()) == pytest.approx(1.0, abs=1e-5)
+    assert second != first
+    assert models["bp"]["beats_baseline"] is True
+
+
+def test_the_ensemble_can_be_switched_off(world: SyntheticWorld) -> None:
+    config = BacktestConfig(
+        world.as_of - timedelta(days=59), world.as_of, fold_days=60, ensemble=False
+    )
+    result = run_backtest(world.matches, world.leagues, fitters_for(["dc", "pi"]), config)
+    assert "ensemble" not in result.summary()["models"]  # type: ignore[operator]
+    assert result.fold_weights == []
