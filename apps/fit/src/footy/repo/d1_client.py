@@ -333,6 +333,12 @@ def insert_statements(
     return statements
 
 
+class BatchRunner(Protocol):
+    """What ``execute_resumable`` needs from a client: ``D1Client`` or a test double."""
+
+    def batch(self, statements: Sequence[Statement]) -> list[list[Row]]: ...
+
+
 class Progress(Protocol):
     def is_done(self, key: str) -> bool: ...
 
@@ -391,7 +397,7 @@ class RunSummary:
 
 
 def execute_resumable(
-    client: D1Client,
+    client: BatchRunner,
     job: str,
     statements: Sequence[Statement],
     progress: Progress,

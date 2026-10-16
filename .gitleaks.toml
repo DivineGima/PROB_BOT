@@ -10,4 +10,6 @@ regexes = [
   '''^(test-|bench-)?(path|header)-secret-0123456789$''',
   '''^super-secret-token-value-123$''',
   '''^123456:BOT-TOKEN-VALUE$''',
+  '''^fd-secret-token-abc123$''',
+  '''^cf-secret-token$''',
 ]

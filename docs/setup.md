@@ -95,16 +95,18 @@ Stage 1 ran this and recorded the result in `docs/verification.md` section 2 (th
 4. Merge the pull request that sets `SPIKE_ENABLED` back to `"0"`.
 
 ### C9. Live D1 probe (verify-at-build item 3)
-After the first deploy, from `apps/fit/src` with the Python venv active (nightly token only in this shell):
+No shell or token needed: run the `data` workflow with the command `d1-probe` (see C11) and tell Claude Code. It reads the JSON from the run log and records it in `docs/verification.md` item 3.
 
-```
-CF_ACCOUNT_ID=d0a180c20666ef79ae23567c024d1a21 D1_DATABASE_ID=f0d80197-890a-4009-8844-4d0fc82223f4 CF_D1_TOKEN=<nightly token> python -m footy.repo.d1_probe
-```
+### C10. Legal decisions (done)
+`docs/legal/source_terms_register.md` is signed: football-data.org enabled, A-1 path 2 (football-data.org only, Scottish Premiership dropped, football-data.co.uk not used). The `FD_ORG_TOKEN` GitHub secret exists.
 
-Paste the JSON it prints into `docs/verification.md` item 3 (through a pull request).
-
-### C10. Legal decisions (not needed for Stage 1 code, needed before Stage 2)
-Read `docs/legal/source_terms_register.md`. Decide A-1 (hand-download football-data.co.uk files, or football-data.org only) and sign the register. For the free-history question, register for the football-data.org token at https://www.football-data.org/client/register once you decide to enable it.
+### C11. Run the data commands (Stage 2)
+Everything runs in GitHub with the stored secrets; you paste nothing. Open https://github.com/DivineGima/PROB_BOT/actions/workflows/data.yml , click **Run workflow**, keep **Branch: main**, pick a command, click the green **Run workflow** button, then tell Claude Code. In this order:
+1. `bootstrap-dry-run`: fetches 3 seasons from football-data.org and writes nothing. It shows how many past seasons the free plan allows and lists club names we do not know yet. About 4 minutes.
+2. Claude Code fixes the alias file from that report (pull request, you merge).
+3. `bootstrap`: seeds teams and aliases and loads the history into D1. About 4 minutes. Safe to run again.
+4. `ingest`: the nightly job's data step (last 7 days and next 3). Safe to run again.
+5. `d1-probe` (optional, any time): the live D1 check from C9.
 
 ## D. Branch controls
 

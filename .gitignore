@@ -34,3 +34,6 @@ Thumbs.db
 
 # wrangler tail captures (contain client IPs and request details)
 tail*.jsonl
+
+# local, resumable bootstrap progress (never committed)
+.footy/

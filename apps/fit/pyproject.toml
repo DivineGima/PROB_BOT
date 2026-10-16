@@ -5,6 +5,9 @@ description = "Nightly fit job for the Football Reliability Screener and Probabi
 requires-python = ">=3.12"
 dependencies = ["requests>=2.34,<3"]
 
+[project.scripts]
+footy = "footy.cli:main"
+
 [build-system]
 requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
