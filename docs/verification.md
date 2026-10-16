@@ -33,11 +33,24 @@ Other facts found while building (re-verify, limits change):
 
 **What this suggests, honestly:** the workload as designed is at risk of exceeding the 6 ms p95 target. The largest single costs are parsing the model blobs and validation, which is exactly what F1 targets (fetch per-team rows instead of whole blobs, drop Zod for bulk arrays). Server CPUs are usually faster than this laptop, so the production number may well be lower, but this must not be assumed. **Decision gate (step 8) is open until the production measurement exists.** If p95 > 6 ms: apply F1 and re-measure; F2/F3 and the parked "pre-computed grids" idea in the tracker go to Divine as an architecture change, not silently.
 
-**Recorded production result:** _not yet measured_ (needs the deployed Worker; see `docs/setup.md`).
+**Recorded production result (2026-10-16): the gate FAILS on the design as built.**
 
-| Run | Date | Invocations | p50 ms | p95 ms | max ms | Verdict |
-|---|---|---|---|---|---|---|
-| (none yet) | | | | | | |
+Source: Cloudflare Workers Logs through the observability API, which holds every request (`wrangler tail` dropped 9 to 10 of 25 events per run and could not supply 20 samples). Only spike requests that answered 200 are counted; the preparation request (204) and unrelated requests are excluded. CPU is whole milliseconds. Three runs from Divine's laptop, 60-match upload, free plan.
+
+| Run | Worker version | Requests | p50 ms | p95 ms | max ms | First 5 requests ms | Above 6 ms | At or above 10 ms |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 429647d4 | 25 | 5 | 22 | 27 | 22, 11, 12, 7, 4 | 10 | 6 |
+| 2 | 429647d4 | 23 | 6 | 22 | 32 | 22, 32, 6, 18, 6 | 11 | 4 |
+| 3 | 4bb7517b | 25 | 6 | 16 | 63 | 63, 10, 6, 6, 6 | 12 | 6 |
+| All | | 73 | 6 | 22 | 63 | | 33 | 16 |
+
+After the first 5 requests of each run: p50 5, 5, 4 and p95 13, 10, 14. So the typical warmed request sits around 3 to 9 ms with spikes to 13 to 16, and the first requests of a fresh isolate (right after a deploy or a quiet period) cost 22 to 63 ms.
+
+**Reading:** p95 is 22 ms against the 6 ms target, and 16 of 73 requests (22%) used 10 ms or more, the Free plan limit. None failed: every invocation ended `ok` with HTTP 200. Cloudflare's limits page says an isolate has "some built-in flexibility" for infrequent overruns and terminates the Worker only if it "starts hitting the limit consistently". That slack is not something to design on: a real upload that lands on a cold isolate could be terminated with error 1102 (risk R-P1). The bot will mostly see the cold case, because uploads come about once a day.
+
+**Caveat on the cold numbers:** the synthetic blobs and the Zod schema are part of the workload, and grammY is not. Both sides move the real figure, so the next step is a re-measure, not a conclusion about the final engine.
+
+**Decision gate (essentials Stage 1, step 8):** p95 is above 6 ms, so F1 is applied and re-measured next (per-team rows instead of whole model blobs, a hand validator instead of Zod, precomputed factorial tables). F2 and F3 are not adopted. Because p95 is above 6 ms, the parked "nightly pre-computed grids" idea is handed to Divine in the tracker.
 
 ## 3. Tests run for Stage 1
 
