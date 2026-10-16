@@ -74,6 +74,8 @@ class BacktestResult:
     fit_config: FitConfig
     folds: int = 0
     fold_failures: dict[str, list[str]] = field(default_factory=dict)  # model -> errors
+    # which fold failed and why, so a failed fit is diagnosable from the job log
+    failure_details: list[dict[str, str]] = field(default_factory=list)
     forecast_matches: int = 0
     skipped_insufficient_history: int = 0
     skipped_unknown_team: Counter[str] = field(default_factory=Counter)
@@ -96,6 +98,7 @@ class BacktestResult:
             "fit_config": self.fit_config.as_dict(),
             "ensemble_fold_weights": self.fold_weights,
             "fold_failures": {m: len(e) for m, e in sorted(self.fold_failures.items())},
+            "fold_failure_details": self.failure_details,
             "baseline": _means_dict(base_overall, self.baseline.comp_means()),
             "models": {},
         }
@@ -200,7 +203,16 @@ def run_backtest(
             if outcome.status == "ok" and outcome.fitted is not None:
                 fitted[name] = outcome.fitted
             else:
-                result.fold_failures.setdefault(name, []).append(outcome.error or "failed")
+                reason = outcome.error or "failed"
+                result.fold_failures.setdefault(name, []).append(reason)
+                result.failure_details.append(
+                    {
+                        "model": name,
+                        "fold_start": fold_start.isoformat(),
+                        "training_matches": str(len(in_window)),
+                        "error": reason,
+                    }
+                )
 
         weights: dict[str, float] = {}
         if use_ensemble and len(fitted) > 1:

@@ -137,6 +137,11 @@ def test_a_failing_model_is_recorded_not_hidden(world: SyntheticWorld) -> None:
     assert result.fold_failures[MODEL_DC] == ["boom", "boom"]
     assert result.forecast_matches == 0
     assert result.summary()["fold_failures"] == {MODEL_DC: 2}
+    details = result.summary()["fold_failure_details"]
+    assert isinstance(details, list) and len(details) == 2
+    assert details[0]["model"] == MODEL_DC and details[0]["error"] == "boom"
+    assert details[0]["fold_start"] == config.test_from.isoformat()
+    assert "fold" in format_report(result.summary()) and "boom" in format_report(result.summary())
 
 
 def test_teams_with_too_little_history_are_skipped_and_counted(world: SyntheticWorld) -> None:
