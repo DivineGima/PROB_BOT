@@ -11,7 +11,21 @@ import { type SpikeMatch, spikeUploadSchema } from "./schema";
  * so each request pays only for parsing them. The workload excludes grammY glue and D1 round trips,
  * so Stage 5 and Stage 7 re-measure the real path.
  */
-const DEFAULT_BLOBS: SpikeBlobs = buildSyntheticBlobs();
+let cachedBlobs: SpikeBlobs | undefined;
+
+/**
+ * Builds the synthetic blobs on first use. Doing it on demand (and not when the module loads) keeps the
+ * harness's own generation cost out of the first measured request: the driver calls `primeBlobs` first
+ * through the `x-spike-prime` header, as real model rows would already be in D1 and cost nothing to build.
+ */
+export function primeBlobs(): void {
+  cachedBlobs ??= buildSyntheticBlobs();
+}
+
+function defaultBlobs(): SpikeBlobs {
+  primeBlobs();
+  return cachedBlobs as SpikeBlobs;
+}
 export const SPIKE_WEIGHTS = [0.4, 0.3, 0.3];
 const MAX_MESSAGE_CHARS = 3900;
 
@@ -92,7 +106,10 @@ function split(blocks: string[]): string[] {
   return messages;
 }
 
-export function runWorkload(uploadText: string, blobs: SpikeBlobs = DEFAULT_BLOBS): WorkloadResult {
+export function runWorkload(
+  uploadText: string,
+  blobs: SpikeBlobs = defaultBlobs(),
+): WorkloadResult {
   let body: unknown;
   try {
     body = JSON.parse(uploadText);

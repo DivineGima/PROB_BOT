@@ -3,7 +3,16 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { benchWorker } from "./cpu-local-bench.mjs";
 import { driveSpike } from "./cpu-spike.mjs";
-import { extractCpuMs, GATE, parseRecords, percentile, summarise } from "./cpu-stats.mjs";
+import {
+  COLD_REQUESTS,
+  cpuSeries,
+  extractCpuMs,
+  GATE,
+  isMeasured,
+  parseRecords,
+  percentile,
+  summarise,
+} from "./cpu-stats.mjs";
 import { buildRegistration, setWebhook } from "./set-webhook.mjs";
 import { runSmoke } from "./smoke.mjs";
 import { isMergedPrCommit, verifyMergedPr } from "./verify-merged-pr.mjs";
@@ -49,10 +58,65 @@ describe("cpu-stats", () => {
   });
 
   it("parses JSON Lines tolerating blank and broken lines, and JSON arrays", () => {
-    const parsed = parseRecords('{"cpuTime":1}\n\n{broken\n{"cpuTime":2}\r\n');
+    const parsed = parseRecords('{"cpuTime":1}\n\n{broken}\n{"cpuTime":2}\r\n');
     assert.equal(parsed.records.length, 2);
     assert.equal(parsed.invalid, 1);
     assert.equal(parseRecords('[{"cpuTime":1},{"cpuTime":2}]').records.length, 2);
+  });
+
+  /**
+   * A tail record in the exact shape `wrangler tail --format json` prints (trimmed).
+   * @param {number} cpuTime
+   * @param {number} ts
+   * @param {{ status?: number, path?: string }} [options]
+   */
+  const tailRecord = (cpuTime, ts, { status = 200, path = "/spike/REDACTED" } = {}) => ({
+    wallTime: cpuTime + 2,
+    cpuTime,
+    outcome: "ok",
+    eventTimestamp: ts,
+    event: { request: { url: `https://w.example${path}`, method: "POST" }, response: { status } },
+  });
+
+  it("reads wrangler's real output: banner text, then multi-line objects with nested braces", () => {
+    const banner =
+      "Successfully created tail, expires at 2026-10-17T00:00:00Z\nConnected to prob-bot, waiting for logs...\n";
+    const body = [tailRecord(22, 1), tailRecord(6, 2)]
+      .map((r) => JSON.stringify(r, null, 4))
+      .join("\n");
+    const text = banner + body;
+    const parsed = parseRecords(text);
+    assert.equal(parsed.records.length, 2);
+    assert.equal(parsed.invalid, 0);
+    assert.deepEqual(parsed.records.map(extractCpuMs), [22, 6]);
+  });
+
+  it("is not confused by braces and quotes inside strings", () => {
+    const tricky = { cpuTime: 3, note: 'a } brace and a " quote and { another', event: {} };
+    const parsed = parseRecords(
+      `${JSON.stringify(tricky, null, 2)}\n${JSON.stringify({ cpuTime: 4 })}`,
+    );
+    assert.deepEqual(parsed.records.map(extractCpuMs), [3, 4]);
+  });
+
+  it("keeps only successful spike requests and orders them by time", () => {
+    const records = [
+      tailRecord(9, 30),
+      tailRecord(40, 5, { status: 204 }), // the prime request
+      tailRecord(1, 6, { status: 401 }), // a rejected caller
+      tailRecord(2, 7, { path: "/tg/REDACTED" }), // a Telegram update
+      tailRecord(7, 10),
+      tailRecord(5, 20),
+    ];
+    assert.equal(isMeasured(records[1]), false);
+    const { values, excluded } = cpuSeries(records);
+    assert.deepEqual(values, [7, 5, 9]);
+    assert.equal(excluded, 3);
+    assert.equal(COLD_REQUESTS, 5);
+  });
+
+  it("keeps records that carry no request details (Workers Logs exports)", () => {
+    assert.deepEqual(cpuSeries([{ cpuTime: 3 }, { $workers: { cpuTimeMs: 4 } }]).values, [3, 4]);
   });
 
   it("passes when p95 <= 6 ms and max < 10 ms with enough invocations", () => {
@@ -332,13 +396,14 @@ describe("smoke", () => {
 
 describe("cpu-spike driver and local bench plumbing", () => {
   it("sends the synthetic upload n times to the secret spike path with the secret header", async () => {
-    /** @type {{ url: string, header: string | null, bytes: number }[]} */
+    /** @type {{ url: string, header: string | null, primed: string | null, bytes: number }[]} */
     const calls = [];
     const fetchImpl = /** @type {typeof fetch} */ (
       async (url, init) => {
         calls.push({
           url: String(url),
           header: new Headers(init?.headers).get("x-telegram-bot-api-secret-token"),
+          primed: new Headers(init?.headers).get("x-spike-prime"),
           bytes: String(init?.body).length,
         });
         return json({ matches: 60 });
@@ -353,9 +418,11 @@ describe("cpu-spike driver and local bench plumbing", () => {
       fetchImpl,
       pauseMs: 0,
     });
-    assert.equal(calls.length, 3);
-    assert.equal(calls[0]?.url, `https://w.example/spike/${PATH_SECRET}`);
-    assert.equal(calls[0]?.header, HEADER_SECRET);
+    assert.equal(calls.length, 4, "one preparation request, then three measured ones");
+    assert.equal(calls[0]?.primed, "1");
+    assert.equal(calls[1]?.primed, null);
+    assert.equal(calls[1]?.url, `https://w.example/spike/${PATH_SECRET}`);
+    assert.equal(calls[1]?.header, HEADER_SECRET);
     assert.deepEqual(result.statuses, { 200: 3 });
     assert.ok(result.bodyBytes > 40_000, "a 60-match upload is about 1 KB per match");
   });

@@ -90,7 +90,7 @@ Open https://github.com/DivineGima/PROB_BOT/settings/secrets/actions and click *
 ### C8. CPU gate (decides whether the design stands)
 1. Make a short pull request that sets `SPIKE_ENABLED = "1"` in `apps/bot/wrangler.toml`, merge it, and wait for the deploy.
 2. In the repo folder run (secrets as environment variables in your shell only):
-   `node scripts/cpu-spike.mjs --n 25`
+   `node scripts/cpu-spike.mjs --n 40`
 3. Within 3 days (Free-plan log retention) open https://dash.cloudflare.com , go to **Workers & Pages > prob-bot > Observability**, export the invocation records for those 25 requests as JSON Lines, and run `node scripts/cpu-stats.mjs <file>`. Alternatively run `npx wrangler tail prob-bot --format json > tail.jsonl` while step 2 runs.
 4. Paste the result into `docs/verification.md` section 2. If p95 is above 6 ms, tell Claude Code: the F1 trims are next.
 5. Make a pull request setting `SPIKE_ENABLED` back to `"0"` and merge it.

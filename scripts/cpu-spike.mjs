@@ -5,7 +5,7 @@
 // switch it off again when the gate is recorded.
 //
 //   WORKER_URL=https://... WEBHOOK_PATH_SECRET=... TELEGRAM_WEBHOOK_SECRET=... \
-//     node scripts/cpu-spike.mjs [--n 25] [--matches 60]
+//     node scripts/cpu-spike.mjs [--n 40] [--matches 60]
 import { fileURLToPath } from "node:url";
 import { buildSyntheticUpload } from "../apps/bot/src/spike/payload.ts";
 
@@ -23,6 +23,26 @@ export async function driveSpike({
 }) {
   const url = `${new URL(workerUrl).origin}/spike/${pathSecret}`;
   const body = JSON.stringify(buildSyntheticUpload(matches));
+  const headers = {
+    "content-type": "application/json",
+    "x-telegram-bot-api-secret-token": headerSecret,
+  };
+  // Preparation request: makes the Worker build its synthetic model data so that cost is not charged to
+  // the first measured request. cpu-stats.mjs ignores it (it answers 204).
+  const prime = await fetchImpl(url, {
+    method: "POST",
+    headers: { ...headers, "x-spike-prime": "1" },
+    body: "{}",
+  });
+  await prime.arrayBuffer();
+  if (prime.status !== 204 && prime.status !== 200) {
+    return {
+      n: 0,
+      bodyBytes: Buffer.byteLength(body),
+      statuses: { [prime.status]: 1 },
+      wallMs: [],
+    };
+  }
   /** @type {Record<string, number>} */
   const statuses = {};
   /** @type {number[]} */
@@ -31,10 +51,7 @@ export async function driveSpike({
     const started = performance.now();
     const response = await fetchImpl(url, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-telegram-bot-api-secret-token": headerSecret,
-      },
+      headers,
       body,
     });
     await response.arrayBuffer();
@@ -61,7 +78,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     workerUrl: env.WORKER_URL ?? "",
     pathSecret: env.WEBHOOK_PATH_SECRET ?? "",
     headerSecret: env.TELEGRAM_WEBHOOK_SECRET ?? "",
-    n: numberFlag(args, "--n", 25),
+    n: numberFlag(args, "--n", 40),
     matches: numberFlag(args, "--matches", 60),
   });
   const sorted = [...result.wallMs].sort((a, b) => a - b);
