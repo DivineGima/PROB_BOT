@@ -172,3 +172,23 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 - Created D1 database `prob-bot` (id `f0d80197-890a-4009-8844-4d0fc82223f4`, account `d0a180c20666ef79ae23567c024d1a21`) and put the id in `apps/bot/wrangler.toml`. Workers subdomain `gimafolabit`, so the Worker URL will be `https://prob-bot.gimafolabit.workers.dev`.
 - **Blocked, not worked around:** the connection cannot create API tokens (Cloudflare error 9109), and writing migration `0001` to the production D1 was denied by the permission check. `deploy.yml` applies it on the first merge; the remote database is still empty.
 - `docs/setup.md` rewritten into ordered manual steps (C1 to C10) with links.
+
+---
+
+## 2026-10-16 (evening) — Stage 1 deployed; CPU gate measured and FAILED (in-progress)
+
+- **Built against:** `PRD_1.md`, `system_architecture_1.md`, `system_architecture_essential_1.md` (all N=1). Stage 1 is **in-progress**.
+- **Done:** PR #1 merged and deployed (guard, migration `0001` on the real D1, Worker, webhook, smoke all green). PR #4 enabled the spike route; PR #5 fixed the measurement tooling (reads `wrangler tail` output, prime request, ignores stray requests). The merge permission rule for the GitHub tool was added locally (`.claude/settings.local.json`, not committed).
+- **CPU gate (ADR-013):** three production runs, 73 spike requests read from Workers Logs: p50 6 ms, **p95 22 ms**, max 63 ms; 16 of 73 at or above the 10 ms Free limit; the first requests on a fresh isolate cost 22 to 63 ms. Nothing failed (Cloudflare tolerates occasional overruns) but the 6 ms target is missed by a wide margin. Full table: `docs/verification.md` section 2.
+- **Next (essentials step 8):** apply F1 (per-team rows instead of whole blobs, hand validator instead of Zod, precomputed tables), re-measure, and report. Do not adopt F2/F3 without Divine.
+- **For Divine (parked idea, now relevant):** have the nightly job pre-compute and store each match's grid for the next 3 days of fixtures, so the Worker only looks them up and the TypeScript grid port disappears. It needs a PRD and architecture version bump, so it is not built. It becomes the leading option if the F1 re-measure still misses 6 ms.
+- **Process notes:** `wrangler tail` is lossy (about 65% of events), so the Workers Logs query is the measurement source from now on. The spike route (`SPIKE_ENABLED=1`) stays on for the F1 re-measure and must be switched back to `0` afterwards.
+
+### Module status
+| Module | Status |
+|---|---|
+| Stage 1: Foundations and CPU spike | **in-progress** (deployed; CPU gate failed, F1 re-measure pending) |
+| Stages 2 to 7 | not started |
+
+### Open issues
+1. CPU gate (above). 2. Live D1 probe (verify item 3) not yet run (needs the nightly token and a shell). 3. Legal register unsigned; A-1 undecided. 4. `data/historical_teams.json` for Stage 2. 5. Missing rules file, git identity, `claude.md` in-place-edit exception.
