@@ -341,3 +341,29 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 | Stage 4: Pi-rating, bivariate Poisson, ensemble, publishing | code **complete** (stacked PR); live backtest, first `fit` and `publish` **in-progress** |
 | Stages 5 to 7 | not started (Stages 5 and 7 wait for the new architecture version) |
 
+---
+
+## 2026-10-17 (night, later) — Stages 3 and 4 CLOSED: live backtest, first fit and first publish
+
+- **Built against:** `PRD_1.md`, `system_architecture_1.md`, `system_architecture_essential_1.md` (all N=1). PRs #14 (Stage 3), #15 (Stage 4), #16 (fold failure reasons) and #17 (optimiser cap) merged; the deploy applied migration `0003` to the real D1.
+- **What the live runs showed** (full tables in `docs/verification.md` sections 5 and 6):
+  - Stage 3 exit criterion met: Dixon-Coles RPS 0.2044 against the baseline's 0.2309 over 2,533 matches, ahead in all nine competitions. The half-life / shrinkage sweep is flat (0.2041 to 0.2061); starting values kept.
+  - Stage 4: every model and the ensemble beat the baseline overall and in all nine competitions (RPS: baseline 0.2304, pi 0.2076, dc 0.2042, bp 0.2042, ensemble 0.2040). dc, bp and the ensemble are statistically indistinguishable; pi is the weakest. Totals RPS barely improves on the baseline.
+  - First `fit` (3 models ok, 225 team_form rows) and first `publish` (gate passed): run `R20261016T232312Z` is active.
+- **Problems found by the live runs and fixed:** (1) the first backtest exited with code 4 because 3 of 23 folds hit the 500-iteration cap; the job gave only a count, so PR #16 added the fold, size and error to the report; (2) the second showed bivariate Poisson hitting the cap in 2 folds; PR #17 raised the cap to 3000 and relaxed the tolerance to 1e-10 (same optimum, fewer iterations). The clean rerun had no failed folds. Lesson: synthetic tests did not reproduce real-data convergence, so a real-data run was necessary before the first fit.
+- **Exit criteria:** Stage 3 (DC beats baseline or shortfall documented): met. Stage 4 (a promoted run readable through the Worker repo path; gate rejection tested; tests green): met; the Worker read path is proven in Vitest against local D1, and a real run is now in production D1.
+- **Carried forward / not blocking:**
+  1. The stability guard and `--rollback` have not yet run against the live service (needs a second run); they are covered by SQLite tests, including an injected mid-promotion failure. D1 batch atomicity on the live service is still unconfirmed (verification item 3).
+  2. Bivariate Poisson is the slowest fit (about 20 s on a production-sized world); the nightly budget of 15 minutes is not threatened.
+  3. For the next architecture snapshot (design chat): the section 8.1 tail claim holds only up to about 2.3 goals per side; the ensemble kappa (100) and the stability bound (0.5) are starting values; the `fit` command listed under Stage 3 actually landed in Stage 4 (ADR-033); ADR-037 would make `fit` the producer of per-match grids.
+  4. Still open from before: PRD_2 / architecture_2 / essentials_2 for pre-computed grids (Stages 5 and 7 wait for it), the `claude.md` in-place-edit exception, the missing `SYETEM DESIGN RULES.html`, git identity, live `d1-probe`.
+
+### Module status
+| Module | Status |
+|---|---|
+| Stage 1: Foundations and CPU spike | **complete** |
+| Stage 2: Ingestion, aliases and bootstrap | **complete** |
+| Stage 3: Dixon-Coles, backtest harness, metrics | **complete** |
+| Stage 4: Pi-rating, bivariate Poisson, ensemble, publishing | **complete** |
+| Stages 5 to 7 | not started (Stages 5 and 7 wait for the new architecture version) |
+

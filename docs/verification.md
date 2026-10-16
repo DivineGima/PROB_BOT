@@ -97,7 +97,7 @@ Mutation checks done by hand (each breaks one behavior and the suite must fail):
 - **Scipy typing.** scipy ships no type stubs; `mypy` ignores missing imports for `scipy.*` only (`pyproject.toml`). It is used only through `scipy.optimize.minimize`.
 - **Golden vectors** live in `packages/contracts/golden/dc_grid_v1.json` (synthetic inputs, 169 cells, markets). Regenerate with `python -m footy.models.golden --write` from `apps/fit` with `PYTHONPATH=src`, then `npx biome format --write packages/contracts/golden`. `--check` (and a pytest) fails when the file differs from the code by more than 1e-12.
 - **Running the backtest on the real data:** Actions, workflow `data`, command `backtest` (inputs `test_days`, `half_lives`, `shrinks`; defaults 365 days and a 3 x 3 sweep). The readable report is in the job log, the JSON summary is stored in `job_runs.summary_json` (kind `backtest`). The numbers it prints are **tuning on history, not validation**: the sweep picks starting values on the same matches it scores.
-- **Real backtest result: PENDING** (the workflow runs only from `main`, so it needs this change merged). Fill in here after the run: test period, matches forecast, RPS of Dixon-Coles vs baseline, per-competition table, chosen half-life and shrinkage.
+- **Real backtest result (production data, 2026-10-16/17; workflow run 38979043352, dc only, 3 x 3 sweep).** Test period 2025-10-17 to 2026-10-16, 23 folds of 14 days, 2,533 matches forecast (230 skipped under the 10-match rule). **Dixon-Coles mean 1X2 RPS 0.2044 against the league-frequency baseline's 0.2309** (skill 11.5%, paired difference -0.0264 +/- 0.0024). It beats the baseline in all nine competitions: BL 0.1909 vs 0.2308, CHA 0.2217 vs 0.2299, EPL 0.2161 vs 0.2288, ERE 0.1987 vs 0.2304, L1 0.2153 vs 0.2306, LL 0.2023 vs 0.2262, PPL 0.1667 vs 0.2294, SA 0.1991 vs 0.2368, UCL 0.2177 vs 0.2417. The half-life / shrinkage sweep is flat: all nine cells lie between 0.2041 and 0.2061; the best is half-life 200 with shrinkage 4 (0.2041), the default 300 / 4 gives 0.2042, so **the starting values were kept**. This run also showed 3 of 23 folds failing to fit (iteration cap of 500); fixed in PR #17 (cap 3000, tolerance 1e-10). **Stage 3 exit criterion met: Dixon-Coles beats the baseline.** Labelled tuning on history, not validation.
 
 ## 6. Stage 4: pi-rating constants (verify-at-build item 8), the models and the registry
 
@@ -126,5 +126,25 @@ Mutation checks done by hand (each breaks one behavior and the suite must fail):
 
 **Operations (manual until `nightly.yml` exists in Stage 7).** Actions, workflow `data`: `backtest` (set `models` to `dc,pi,bp` and a single half-life and shrinkage for the full comparison), then `fit`, then `publish`. **Rollback:** `python -m footy.cli publish --rollback RUN_ID` (the workflow's `publish` command does not expose it; run it from a shell with the D1 token, or ask Claude Code to add a workflow input). Only a `superseded` run still inside the newest 30 can be rolled back to.
 
-**Real results: PENDING.** Backtest comparison of the three models, the ensemble and the baseline on the production data, and the first real `fit` and `publish`, need this change merged (the workflow runs only from `main`). Record them here.
+**Real results (production data, 2026-10-17).**
+
+Clean three-model backtest after the optimiser fix (workflow run 38980767946: models `dc,pi,bp`, 365 days, half-life 300, shrinkage 4; no failed folds). 23 folds, 2,861 matches forecast, 230 skipped:
+
+| Forecaster | RPS 1X2 | RPS totals | Log loss | Skill vs baseline | Paired RPS difference |
+|---|---|---|---|---|---|
+| Baseline (league frequencies) | 0.2304 | 0.0758 | 1.0737 | | |
+| Pi-rating | 0.2076 | 0.0757 | 1.0115 | 9.9% | -0.0228 +/- 0.0026 |
+| Dixon-Coles | 0.2042 | 0.0757 | 0.9981 | 11.4% | -0.0262 +/- 0.0022 |
+| Bivariate Poisson | 0.2042 | 0.0756 | 0.9985 | 11.4% | -0.0262 +/- 0.0022 |
+| **Ensemble** | **0.2040** | **0.0751** | 0.9975 | 11.5% | -0.0264 +/- 0.0023 |
+
+Per competition (RPS 1X2; baseline / pi / dc / bp / ensemble): BL .2311/.1989/.1956/.1956/.1958, CHA .2300/.2268/.2204/.2204/.2209, EPL .2280/.2176/.2129/.2130/.2128, ERE .2294/.1970/.1968/.1970/.1964, L1 .2310/.2162/.2119/.2120/.2120, LL .2267/.2039/.2023/.2023/.2019, PPL .2285/.1774/.1761/.1763/.1759, SA .2358/.1991/.1988/.1988/.1983, UCL .2392/.2238/.2121/.2119/.2097.
+
+What this does and does not show:
+- **Every model and the ensemble beat the baseline overall and in all nine competitions.** The pi-rating mapping (a hypothesis, GR-07) works, but it is the weakest of the three.
+- **Dixon-Coles, bivariate Poisson and the ensemble are tied for practical purposes.** The gaps between them (0.0002) are far smaller than the standard error of the paired difference against the baseline (0.002), so none of the three can be called better than another on this evidence. The ensemble is nominally best overall; its clearest edge is UCL (0.2097 vs 0.2119 and 0.2121), the weakest-identified league link (ADR-007), where only 120 matches were forecast.
+- The totals RPS is almost identical for all forecasters, so the models add little over league frequencies for total goals; the 1X2 market is where they help.
+- **Not a validation.** The windows overlap the data used to choose the starting values; half-life, shrinkage, kappa and the stability bound are still unvalidated starting values. The product's success metric (beat the baseline over at least 300 logged live predictions) is measured later from the prediction log.
+
+First real `fit` (run 38981127749) and `publish` (run 38981213952): all three models `ok`, no failures; 225 `team_form` rows; 6,813 matches in the window; ensemble weights from the backtest prior (kappa 100): bp 0.368, dc 0.369, pi 0.263; the gate passed on the first run (models ok, all payload hashes verified on re-read, team_form coverage 1.0; the stability guard had no previous run to compare with) and **run `R20261016T232312Z` is the active run**. Not yet exercised on the live service: a second publish with the stability guard against a real previous run, and a rollback.
 
