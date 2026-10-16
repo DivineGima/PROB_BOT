@@ -8,7 +8,7 @@ Derived From: PRD_1.md
 | Date | 2026-10-15 |
 | Author | Divine Gima Folabit (owner) with Claude (System Designer) |
 | Status | **Locked for build** on Divine's delegated authority ("I leave you the liberty to ask, to answer, and close the gaps"). Four amendment candidates (§4.3) are flagged for Divine; none blocks Stage 1 of Essentials 1. |
-| Revision | **Rev-1, amended in place on 2026-10-16** after the `/plan-eng-review` of this version, at Divine's explicit instruction (an exception to the `claude.md` rule against in-place edits). Changed passages are tagged `[Rev-1]`; the full list is §18. Version number stays 1, so the PRD/architecture/essentials alignment and drift checks are unaffected. **Rev-2, same day:** Divine's decisions on amendments A-1 to A-4 (§4.3, ADR-035, ADR-036); tagged `[Rev-2]`. **Rev-3, 2026-10-17:** records the outcomes of the Stage 1 and Stage 2 builds and Divine's decisions of that day (CPU gate result and the pre-computed-grids choice, A-1 path 2, measured football-data.org history depth), at Divine's explicit instruction; tagged `[Rev-3]`. Rev-3 only records facts and decisions already taken; the pre-computed-grids redesign itself is **not** part of this version and needs PRD_2 and a new architecture version (ADR-037). Version number stays 1. |
+| Revision | **Rev-1, amended in place on 2026-10-16** after the `/plan-eng-review` of this version, at Divine's explicit instruction (an exception to the `claude.md` rule against in-place edits). Changed passages are tagged `[Rev-1]`; the full list is §18. Version number stays 1, so the PRD/architecture/essentials alignment and drift checks are unaffected. **Rev-2, same day:** Divine's decisions on amendments A-1 to A-4 (§4.3, ADR-035, ADR-036); tagged `[Rev-2]`. **Rev-3, 2026-10-17:** records the outcomes of the Stage 1 and Stage 2 builds and Divine's decisions of that day (CPU gate result and the pre-computed-grids choice, A-1 path 2, measured football-data.org history depth), at Divine's explicit instruction; tagged `[Rev-3]`. Rev-3 only records facts and decisions already taken; the pre-computed-grids redesign itself is **not** part of this version and needs PRD_2 and a new architecture version (ADR-037). Version number stays 1. **Rev-4, 2026-10-17:** records the outcomes of the Stage 3 and Stage 4 builds and live runs (measured tail, extreme-fixture guard, as-built model, ensemble and gate details, CLI options, backtest results), at Divine's explicit instruction after a code review; tagged `[Rev-4]`. Rev-4 changes no requirement and the version number stays 1. |
 | Source of truth order | `PRD_1.md` → this file → `/essentials/*` → code |
 
 ---
@@ -445,6 +445,8 @@ An alias that resolves to two teams is impossible by the unique key. A source sp
 | shots_n, season_sf, season_sa, l10_sf, l10_sa | shots; NULL in v1 (shots drift deferred, ADR-026) [Rev-1] |
 | latest_match_date | Freshness per team |
 
+**[Rev-4]** `team_form` has a row for every active team of the run; a team without matches (for example the dropped Scottish clubs) has `n_training = 0` and NULL means, and the Worker treats it as INSUFFICIENT_HISTORY. `model_params` also carries a CHECK that an `ok` row has its payload, version and hash. The CHECK lists on `model` and `status` are fixed by this schema: adding a fourth model or a new run status needs a table-rebuild migration, not a plain additive one.
+
 ### 5.5 Prediction log
 
 **`uploads`**
@@ -630,6 +632,8 @@ Omission codes are in §5.5. A `Result<T,E>` type is used for expected failures;
 | `footy alert --text` | Send a Telegram alert (used on workflow failure) | Workflow `if: failure()` |
 
 Exit codes: `0` ok, `2` data/validation failure, `3` source outage (cached data used), `4` fit failure (partial), `1` unexpected. Workflows alert on non-zero.
+
+**[Rev-4]** As built: `footy backtest [--models dc,pi,bp] [--test-days N] [--fold-days N] [--half-lives a,b] [--shrinks a,b] [--out FILE]` (needs only D1; writes a `job_runs` row, the readable report goes to stderr); `footy fit [--models ...] [--as-of YYYY-MM-DD]`; `footy publish [--run-id ID | --rollback ID]`. Model commands need only the D1 variables; the football-data.org legal gate applies to `bootstrap` and `ingest` only. A gate rejection, a failed model and a backtest with a failed fold all exit with code 4.
 
 ### 6.8 I-6 — External APIs consumed
 
@@ -872,6 +876,8 @@ flowchart LR
 └── .github/workflows/             ci.yml, deploy.yml, data.yml [Rev-3], nightly.yml, backtest.yml
 ```
 
+**[Rev-4]** As built, the fit package also has `backtest/` (walk-forward, report, job), `models/{structure,registry,types,golden}.py`, `fitting.py` (the `fit` job), `repo/{training,models}.py` and `ensemble/weights.py`; `scoring/` holds the baseline and the calibration bins. The Worker's `repo/index.ts` gained `runs.readActive()` and `payloadVerifies()`.
+
 Rules: no raw source data (CSV, API dumps) is ever committed — tests use synthetic generators (ADR-025); secrets only in GitHub/Cloudflare secret stores; the bot imports nothing from `apps/fit` and vice versa; the only shared artifacts are `packages/contracts`, `data/`, and `db/migrations`.
 
 ### 7.7 "Frontend / backend flow"
@@ -1017,9 +1023,11 @@ stateDiagram-v2
 - P(over L) for L ∈ {0.5,…,5.5} = Σ_{i+j > L} G; Under = 1 − Over (computed, never stored separately).
 - Total-goals pmf (0..11, 12+) is derived once and used for RPS on totals.
 
-Properties (property-tested in both languages): grid ≥ 0, sums to 1 within 1e-9, tail mass beyond 12 goals < 1e-6 before renormalisation, overs monotone non-increasing in L, mirror symmetry when home/away parameters are swapped with home-advantage removed.
+Properties (property-tested in both languages): grid ≥ 0, sums to 1 within 1e-9, tail mass beyond 12 goals < 1e-6 before renormalisation **[Rev-4: measured to hold per side up to about 2.3 goals; above that the grid is still renormalised and still sums to 1]**, overs monotone non-increasing in L, mirror symmetry when home/away parameters are swapped with home-advantage removed.
 
 Cross-language parity: Python is the reference. `packages/contracts/golden/` holds JSON vectors (inputs → grid cells and markets) produced by Python; Vitest asserts the TypeScript engine matches cell by cell within 1e-9 (no cross-language hash) [Rev-1]. This is the training-serving-skew control (RESOURCE 3).
+
+**[Rev-4] Extreme-fixture guard (ADR-039).** When a grid is built from fitted parameters, each goal rate is clipped to 0.01..6 and the Dixon-Coles rho is clamped to the interval in which every correction factor stays positive (from -0.999 / max(lambda, 1) to min(0.999, 0.999 / (lambda_home x lambda_away))). Inside the normal range this changes nothing; for a very strong side against a very weak one it prevents a negative factor (which crashed a test backtest). The golden vectors include clipped and clamped cases, so any other implementation must apply the same rule.
 
 ### 8.2 Models (all implemented in-house with numpy/scipy; `penaltyblog` is an optional test oracle, not a runtime dependency — ADR-019)
 
@@ -1037,9 +1045,13 @@ Failure semantics (ADR-019/FR-07): a model that fails convergence or sanity chec
 
 Sanity checks per model before storing `ok`: optimiser success, finite parameters, all |attack/defence| within bounds, mean λ per league in [0.3, 3.5], a test grid for a typical fixture sums to 1.
 
+**[Rev-4] As built (Stages 3 and 4).** (a) Dixon-Coles and bivariate Poisson share one pooled parameterisation: intercept, home advantage, league offsets and team deviations shrunk toward their league mean by a ridge (`shrink_team` 4, `shrink_league` 0.1, unvalidated); fitted with L-BFGS-B and an analytic gradient, at most 3000 iterations, tolerance 1e-10 (the first values, 500 and 1e-12, failed on real data in a few folds), no warm start (a cold fit takes about 1 s for Dixon-Coles and about 20 s for bivariate Poisson on a production-sized set). A fit with fewer than 50 matches in the window fails. (b) The bivariate Poisson gradient uses dP(x,y)/dlambda1 = P(x-1,y) - P(x,y) (likewise lambda2; lambda3 with P(x-1,y-1)); lambda3 is one shared constant. (c) Pi-rating constants were verified against the paper (verify-at-build item 8): lambda 0.035, gamma 0.7, b 10, c 3, psi(e) = 3 log10(1+e), initial rating 0. The grid mapping adds one fitted scale s (observed on predicted goal difference, through the origin, clipped to 0.2..2), so d = s x gD before the T +/- d split. The pi-rating is league-agnostic and has no shrinkage. (d) The training window and the time decay end at the data cut-off (the latest stored verified result) or at `--as-of`.
+
 ### 8.3 Ensemble weighting (ADR-020)
 
 For each model m let `RPS̄_m` be its mean RPS (1X2) over the most recent N = 200 scored predictions that have a stored per-model probability. Raw weight `w̃_m = exp(−κ · RPS̄_m)`, normalised to `w_rps`. With `n` scored predictions available, final weight `w = (n/(n+50))·w_rps + (50/(n+50))·(1/M)` over the M models that fit tonight. Until the first scored predictions exist, **initial weights come from the walk-forward backtest** (run at launch) and equal weights if that is unavailable. κ is a backtest-tuned starting value, **unvalidated**. Weights are written into `model_runs.ensemble_json` and copied into every prediction (`weights_json`).
+
+**[Rev-4] As built (ADR-040).** `w = n/(n+50) x w_rps + 50/(n+50) x w_prior`, where `w_prior` is the softmax of the walk-forward backtest's mean RPS when a stored `backtest` summary covers every fitted model, and equal weights otherwise (the rule written above). kappa = 100, because RPS differences between the models are about 0.001 to 0.01. All are starting values, unvalidated. In the production backtest the three models' RPS were within 0.0034 of each other, so the weights stay near equal.
 
 ### 8.4 Drift filter (ADR-021)
 
@@ -1072,6 +1084,8 @@ Inputs per team from `team_form` (precomputed at fit time): season goals for/aga
 3. Pass → one statement updates the pointer: `UPDATE active_run SET run_id=?, activated_at=? WHERE id=1`, then the previous run becomes `superseded`. Fail → new run is `rejected`; the old run stays active; alert.
 4. The Worker reads the run with **one statement keyed through the pointer** (`WHERE run_id = (SELECT run_id FROM active_run WHERE id = 1)`), so it never sees a half-published run.
 5. Rollback = set the pointer back to a `superseded` run still retained (30 runs kept).
+
+**[Rev-4] As built.** `footy fit` stores a `building` run with a row for every attempted model (a failed model as `failed` with its reason and no payload) and a `team_form` row for every active team. The gate checks: status `building`; every attempted model has a row and at least one is `ok`; `team_form` covers at least 95% of active teams; every `ok` payload's SHA-256 verifies on re-read and its version is understood; each payload holds at least 95% of the teams that had training matches; and the stability guard (bound **0.5** on any team value: attack or defence for dc and bp, home or away rating for pi; stored in `config_json`, unvalidated; skipped when there is no active run). A rejected run becomes `rejected`, the reasons are stored in its `diagnostics_json`, an `alert` event is written (deduped per run; the Telegram sender is Stage 7) and the command exits with code 4. Promotion is one batch of three guarded statements (activate the run; upsert the pointer only if that run is active; supersede the old run only if the pointer moved); promoting the active run again is a no-op. Runs beyond the newest 30, never the active one, are deleted with their children. Rollback: `footy publish --rollback RUN_ID` (a `superseded` run, no gate).
 
 ### 8.7 Prediction log and scoring
 
@@ -1184,7 +1198,7 @@ Approach: small, free, and sufficient for one user — structured logs, durable 
 | `ci.yml` | `pull_request` to `main` | none | Install with lockfiles; lint + typecheck (TS), ruff + mypy (Py); Vitest (Workers pool, local D1); pytest; golden-vector parity test (TS vs Python grids); migration lint (no `DROP`/`RENAME` in the same migration that adds a replacement; migrations apply cleanly to an empty D1 and to the previous schema); gitleaks; "no data files" check (no CSV/JSON dump above size threshold outside `packages/contracts` and `data/`); whole-nightly-job test (ingest, score, fit, publish on synthetic fixtures with a SQLite-backed fake D1 client) [Rev-1] |
 | `deploy.yml` | `push` to `main` | `CF_DEPLOY_TOKEN` | Guard: verify head commit belongs to a merged pull request; apply D1 migrations; `wrangler deploy`; run `scripts/set-webhook`; post-deploy smoke (wrong-header request → 401; `/healthz`-equivalent) |
 | `nightly.yml` | `schedule` (`17 1 * * *`, A-3 accepted [Rev-2]) + `workflow_dispatch` | D1 token, Telegram, `FD_ORG_TOKEN` | `ingest → score → fit → publish`, Monday also `report`; step `if: failure()` sends a Telegram alert; `concurrency` group prevents overlapping runs; `timeout-minutes: 45` |
-| `data.yml` [Rev-3] | `workflow_dispatch` only, `main` only | `FD_ORG_TOKEN`, D1 token | Manual runs of `footy bootstrap --dry-run`, `footy bootstrap`, `footy ingest` and `python -m footy.repo.d1_probe`; the chosen command reaches the shell only as an environment variable. Scheduled use is `nightly.yml` in Stage 7 |
+| `data.yml` [Rev-3] | `workflow_dispatch` only, `main` only | `FD_ORG_TOKEN`, D1 token | Manual runs of `footy bootstrap --dry-run`, `footy bootstrap`, `footy ingest`, `python -m footy.repo.d1_probe`, and [Rev-4] `footy backtest` (inputs `models`, `test_days`, `half_lives`, `shrinks`), `footy fit` and `footy publish`; the chosen command reaches the shell only as an environment variable. Scheduled use is `nightly.yml` in Stage 7 |
 | `backtest.yml` | monthly schedule + manual | D1 read token scope (same D1 token) | Walk-forward backtest on stored matches; compares to the baseline and to the previous report; fails on a regression beyond tolerance (informational alert, not a deploy block) |
 
 Rollback: Worker — redeploy the previous commit (revert PR); model run — repoint `active_run` to a retained `superseded` run (§8.6); schema — forward-only fixes (additive-first rule).
@@ -1362,6 +1376,9 @@ Status values: Accepted (locked), Accepted-hypothesis (locked but validated by b
 | 036 | [Rev-2] A-3 and A-4 accepted: nightly cron `17 1 * * *` (01:17 UTC, 06:47 IST); reply p95 ≤ 30 s from upload to first message | GitHub delays top-of-hour schedules; a testable latency target | `0 1 * * *`; no target; 15 s target | NFR-11 |
 | 037 | [Rev-3] Direction chosen by Divine on 2026-10-16 after the failed CPU gate: the nightly job pre-computes and stores each upcoming match's grid and the Worker looks it up (removes the TypeScript grid port). **Design not yet written** | Production p95 16 ms after F1 against a 6 ms target; uploads are about daily so requests are cold | F2 split, F3 offload to Actions, Workers Paid plan, accept the risk | Needs PRD_2, architecture_2 and essentials_2 from design chat; changes Stages 5 and 7; golden-vector parity (§8.1) would no longer be needed for the Worker |
 | 038 | [Rev-3] Stage 2 data commands run as a manual `data` workflow (`workflow_dispatch`, main only) with `SOURCE_ENABLED_FDORG` set in that workflow, until `nightly.yml` exists in Stage 7 | Lets bootstrap, dry-run, ingest and the D1 probe run with stored secrets and no pasting | Run locally with pasted tokens | One more workflow to maintain; the flag is set only after the register entry is signed |
+| 039 | [Rev-4] Extreme-fixture guard: goal rates clipped to 0.01..6 and the Dixon-Coles rho clamped to its feasible interval when a grid is built | A fitted rho with a rate near 5 made a correction factor negative and crashed a test backtest | Reject the fixture; clamp rho inside the fit only | Part of the Python reference and the golden vectors; any other implementation must match |
+| 040 | [Rev-4] The ensemble shrinks toward the backtest-derived weights when available (equal weights otherwise); kappa = 100 | Section 8.3 says the initial weights come from the backtest but shrinks toward 1/M; kappa has to suit RPS differences of about 0.003 | Shrink to 1/M only; kappa = 1 | Starting values, unvalidated |
+| 041 | [Rev-4] `team_form` has a row for every active team; the promotion gate numbers are fixed (coverage 95%, payload coverage 95%, stability bound 0.5) | Teams without matches must be omitted as INSUFFICIENT_HISTORY, and the coverage check must be satisfiable | Rows only for teams with matches | Thresholds stored in `config_json`, unvalidated |
 
 **Amendments decided by Divine on 2026-10-16 [Rev-2]:** A-1 decided (ADR-035: hand-downloaded co.uk files if the Stage 1 check allows it, otherwise football-data.org only and the Scottish Premiership dropped); A-2 accepted (two Cloudflare tokens, ADR-018); A-3 accepted (cron `17 1 * * *`, ADR-036); A-4 accepted (reply p95 ≤ 30 s, NFR-11, ADR-036). **[Rev-3] A-1 resolved on 2026-10-16/17: path 2 (football-data.org only, Scottish Premiership dropped).** Only open item: whether the Stage 1 terms check allows hand downloading, which selects path 1 or path 2 of A-1.
 
@@ -1451,6 +1468,12 @@ R-L1 co.uk terms for hand downloading (§9.8, checked in Stage 1; no automated u
 - Item 3: the D1 REST API accepted batches of 10 statements and statements of up to 100 bound parameters in the production bootstrap. Batch atomicity is still not confirmed against the live service.
 - Item 7: Worker CPU gate failed (p95 22 ms, then 16 ms after F1); see §8.10 and ADR-037.
 
+**[Rev-4] Outcomes recorded 2026-10-17 (details in `docs/verification.md` sections 5 and 6):**
+- Item 8: pi-rating constants verified (lambda 0.035, gamma 0.7, b 10, c 3, psi = 3 log10(1+e)). The exact formula rests on the paper's prose, the author's 2022 restatement and the CRAN implementation, because the PDF's equations did not extract as text.
+- Stage 3 backtest (production, 2,533 matches): Dixon-Coles RPS 0.2044 against the baseline's 0.2309, ahead in all nine competitions.
+- Stage 4 comparison (2,861 matches): baseline 0.2304, pi 0.2076, dc 0.2042, bp 0.2042, ensemble 0.2040; all beat the baseline in every competition; dc, bp and the ensemble are statistically tied. Not a validation.
+- Item 3: batch atomicity is still not tested against the live service.
+
 **Source-file finding:** `SYETEM DESIGN RULES.html` in the project contains only a saved, empty claude.ai chat shell — no rules. Operative rules therefore come from the project instructions, `system_architecture.md.md` (house format), the C4 resource, and the other resources. Divine should re-upload the intended rules file if it exists.
 
 ---
@@ -1519,3 +1542,17 @@ Recorded at Divine's explicit instruction after a code review of Stages 1 and 2.
 | ADR-038 | Manual `data` workflow for Stage 2 commands | §7.6, §9.3, §14 |
 | Inventory | `TELEGRAM_WEBHOOK_SECRET` and `WORKER_URL` are also GitHub secrets | §9.1 |
 | Ledger | Verify-at-build items 1, 2, 3 and 7 resolved or answered | §16 |
+
+### Rev-4 (2026-10-17): outcomes of the Stage 3 and Stage 4 builds
+
+Recorded at Divine's explicit instruction after the live runs and a code review of Stages 3 and 4. No requirement changed in this version. Review findings that are open are tracked in `/tracker/`, not here.
+
+| Ref | Change | Where |
+|---|---|---|
+| ADR-039 | Extreme-fixture guard (rate clip, rho clamp); the 1e-6 tail claim measured to hold up to about 2.3 goals per side | section 8.1, section 14 |
+| As built | Shared pooled parameterisation, no warm start, optimiser cap 3000 and tolerance 1e-10, pi-rating constants and fitted scale, window ends at the data cut-off | section 8.2 |
+| ADR-040 | Ensemble prior from the backtest, kappa 100 | section 8.3, section 14 |
+| ADR-041 | `team_form` for every active team; as-built gate, promotion batch, pruning and rollback | sections 5.4 and 8.6, section 14 |
+| CLI | `backtest`, `fit`, `publish` options; exit code 4 cases; legal gate only for data commands; `data.yml` commands | sections 6.7 and 9.3 |
+| Structure | `backtest/`, `fitting.py`, `models/*`, `repo/{training,models}.py`, Worker `runs.readActive` | section 7.6 |
+| Ledger | Item 8 verified; Stage 3 and 4 backtest results | section 16 |
