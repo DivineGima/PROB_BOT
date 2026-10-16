@@ -8,10 +8,16 @@ import { fileURLToPath } from "node:url";
  */
 
 /**
- * @param {{ workerUrl: string, pathSecret: string, botToken?: string, fetchImpl?: typeof fetch }} input
+ * @param {{ workerUrl: string, pathSecret: string, botToken?: string, fetchImpl?: typeof fetch, now?: () => number }} input
  * @returns {Promise<Check[]>}
  */
-export async function runSmoke({ workerUrl, pathSecret, botToken, fetchImpl = fetch }) {
+export async function runSmoke({
+  workerUrl,
+  pathSecret,
+  botToken,
+  fetchImpl = fetch,
+  now = Date.now,
+}) {
   const origin = new URL(workerUrl).origin;
   /** @type {Check[]} */
   const checks = [];
@@ -69,7 +75,7 @@ export async function runSmoke({ workerUrl, pathSecret, botToken, fetchImpl = fe
   if (botToken) {
     try {
       const response = await fetchImpl(`https://api.telegram.org/bot${botToken}/getWebhookInfo`);
-      /** @type {{ ok?: boolean, result?: { url?: string, last_error_message?: string, allowed_updates?: string[] } }} */
+      /** @type {{ ok?: boolean, result?: { url?: string, last_error_message?: string, last_error_date?: number, allowed_updates?: string[] } }} */
       const info = await response.json();
       const registered = info.result?.url === `${origin}/tg/${pathSecret}`;
       checks.push({
@@ -77,11 +83,20 @@ export async function runSmoke({ workerUrl, pathSecret, botToken, fetchImpl = fe
         ok: registered,
         detail: registered ? "registered" : "URL differs or is empty",
       });
-      const clean = !info.result?.last_error_message;
+      // Telegram keeps reporting the last delivery error until a later delivery succeeds, so an old
+      // error (for example from an earlier outage) must not fail a healthy deploy. Only an error from
+      // the last 15 minutes, or one without a date, counts.
+      const errorDate = info.result?.last_error_date;
+      const recent = typeof errorDate !== "number" || now() - errorDate * 1000 < 15 * 60 * 1000;
+      const clean = !info.result?.last_error_message || !recent;
       checks.push({
         name: "Telegram reports no delivery error",
         ok: clean,
-        detail: clean ? "no error" : "Telegram reports a delivery error",
+        detail: clean
+          ? info.result?.last_error_message
+            ? "only an old delivery error is on record"
+            : "no error"
+          : "Telegram reports a delivery error",
       });
     } catch {
       checks.push({ name: "Telegram webhook info readable", ok: false, detail: "request failed" });

@@ -253,3 +253,34 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 - **Open before Stage 2 can be called complete (needs live runs, user starts them from the Actions tab):** (1) `bootstrap-dry-run` to measure free-history depth and list unmapped club names; (2) alias fixes from that report; (3) `bootstrap`; (4) `ingest`; (5) exit criteria check: matches populated and consistent, zero unmapped or a documented list; (6) optional `d1-probe`.
 - **Risks to watch:** free tier may return only the current season, which means teams stay below 10 matches for weeks (warm-up) and the UCL-only clubs likely stay INSUFFICIENT_HISTORY; the `fd_org.json` spellings are unverified until the dry-run.
 - **Module status:** Stage 2: code `complete`, live verification `in-progress`. Stages 3 to 7 not started.
+
+---
+
+## 2026-10-17 (later) — Stage 2 live runs, code review of Stages 1 and 2, source-of-truth alignment; Stage 2 CLOSED
+
+- **Built against:** `PRD_1.md`, `system_architecture_1.md`, `system_architecture_essential_1.md` (all N=1; Rev-3 notes added today, version unchanged).
+- **Stage 2 live results (GitHub Actions workflow `data`, production D1):**
+  - `bootstrap-dry-run`: 9,280 matches fetched (9 competitions x 3 seasons), every record parsed, no anomaly or outage. **The free plan returns all three seasons** (2024-25, 2025-26, 2026-27), so there is no warm-up problem. 509 matches were skipped only because 15 club spellings were unknown; added to `data/aliases/fd_org.json` with a regression test each (PR #12).
+  - `bootstrap`: 10 competitions, 179 active + 59 history-only teams, 616 aliases, **9,280 matches inserted**, 0 unmapped, 0 anomalies, 27 fetches logged. Direct D1 checks: 0 impossible goal values, 0 self-matches, 0 orphan teams; 6,802 finished results all verified (6,794 `ft_90`, 8 `regular` after extra time); 3 `AWARDED` kept as `unverified` with no goals; fixtures to May 2027 present.
+  - `ingest`: window 2026-10-09..2026-10-19 accepted by the API (no range-limit problem); 11 matches updated, 152 unchanged, 0 changed results; team-list check resolved all clubs in all nine competitions (including 36 in the Champions League). 15 `status_regression` events: the source reported finished matches as `TIMED` again; the forward-only rule kept the stored results (working as designed).
+  - 29 clubs have fewer than 10 verified matches: the 11 Scottish clubs (league dropped), 5 Champions League-only clubs (2 each) and recently promoted clubs (5 to 8). This is the `INSUFFICIENT_HISTORY` rule operating, not a defect.
+- **Code review (`/code-review` high, apps/ scripts/ db/ .github/ data/): 12 findings. Fixed (real):**
+  1. Worker: every message from a non-allowlisted sender wrote an `events` row (quota exhaustion risk). `events.record` now supports a real 24 h dedupe key; ignored updates use an hourly key (at most 24 rows a day). Tests added.
+  2. Fit job: `D1Error` was not caught, leaving `job_runs` at `running` and losing the fetch log. Both jobs now catch it, record the failure best-effort and return exit 1. Tests added (database failure; database fully down).
+  3. `RequestsTransport` read the body with `raw.read`, whose urllib3 errors skipped the retry loop. Now uses `iter_content` with a size cap and closes the response; mid-body failures are retried. Tests added with a stub session.
+  4. Anomaly events were written without a dedupe key and would repeat every night. Now one per anomaly per 24 h.
+  5. `run_ingest` took an unused `ref` and the CLI loaded the local data files for `ingest`, adding a failure mode. Removed. A stale progress file now gives a clear `DataError` instead of a `KeyError`.
+  6. `scripts/smoke.mjs` failed on any old Telegram `last_error_message`. Only an error from the last 15 minutes counts now. Test added.
+- **Reviewed and not changed (with reason):** ingest window possibly too long for the API (disproved by the live run); matches not resuming (disproved: the write plan compares with stored rows, so a rerun sends only the missing rows; a test now proves it); `start_job` and keyless events not idempotent on a lost response (worst case one extra row; accepted); spike route buffering the body (route is off and deprecated); hard-coded `CHECK` lists (they are the architecture's schema; a new competition would be a rebuild migration, noted); `walk.mjs` skip list (those folders are git-ignored, so nothing in them can be committed).
+- **Source-of-truth alignment (Rev-3, at Divine's explicit instruction; version stays 1):** `system_architecture_1.md` header, §4.3 (A-1 outcome), §7.6, §8.5, §8.10, §9.1 (inventory gaps closed), §9.3 (`data.yml`), §9.8, §14 (ADR-013 status, new ADR-037 pre-computed grids direction, ADR-038 manual data workflow), §16 (ledger outcomes for items 1, 2, 3, 7), §18 (Rev-3 table). `essential_1.md` header, Stage 1 step 8 and Stage 2 step 1 outcomes. `docs/verification.md` rows 3 and 7. **`PRD_1.md` is untouched:** it still lists the Scottish Premiership and the Worker computing grids; both changes (path 2 and ADR-037) must be carried into PRD_2 by design chat.
+- **Verification today:** pytest 210, Vitest 76, script tests 47, ruff, mypy strict, Biome, repo rule checks, migration lint all green.
+- **Needs Divine / design chat:** PRD_2 + architecture_2 + essentials_2 for the pre-computed-grids design (changes Stages 5 and 7); decide how the PRD should treat the dropped Scottish Premiership; review the 9 `verify` clubs in `data/historical_teams.json` (none caused an unmapped name in the live runs, so the draft covered every club that appeared); the `claude.md` rule against in-place edits has no recorded exception for Rev-1 to Rev-3 (unchanged open issue).
+- **Still open (not blocking):** live `d1-probe` (atomicity of batches), `SYETEM DESIGN RULES.html` missing, git identity, Time Travel retention.
+
+### Module status
+| Module | Status |
+|---|---|
+| Stage 1: Foundations and CPU spike | **complete** (CPU gate failed; pre-computed grids chosen; redesign pending in design chat) |
+| Stage 2: Ingestion, aliases and bootstrap | **complete** (code, live bootstrap and ingest verified, review findings fixed) |
+| Stage 3: Dixon-Coles, backtest harness, metrics | not started; next |
+| Stages 4 to 7 | not started (Stages 5 and 7 wait for the new architecture version) |

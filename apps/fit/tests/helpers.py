@@ -31,12 +31,18 @@ class SqliteD1:
         self.requests = 0
         self.fail_next: Exception | None = None
         self.fail_at_request: int | None = None
+        self.fail_when: Callable[[Sequence[Statement]], bool] | None = None
+        self.sent: list[str] = []
 
     def query(self, sql: str, params: Sequence[object] = ()) -> list[Row]:
         return self.batch([Statement(sql, tuple(params))])[0]  # type: ignore[arg-type]
 
     def batch(self, statements: Sequence[Statement]) -> list[list[Row]]:
         self.requests += 1
+        self.sent.append(statements[0].sql if statements else "")
+        if self.fail_when is not None and self.fail_when(statements):
+            self.fail_when = None
+            raise D1TransientError("injected failure")
         if self.fail_at_request == self.requests:
             raise D1TransientError("injected failure")
         if self.fail_next is not None:

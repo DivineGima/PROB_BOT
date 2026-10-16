@@ -112,7 +112,7 @@ describe("allowlist and dedupe (S2, S3)", () => {
     expect(await count("processed_updates", "update_id = 13")).toBe(1);
   });
 
-  it("ignores other chats, other users and groups: 200, no reply body, one counter event, no dedupe row", async () => {
+  it("ignores other chats, other users and groups: 200, no reply body, at most one counter event per hour, no dedupe row", async () => {
     const others = [
       {
         ...allowedUpdate(20),
@@ -133,7 +133,10 @@ describe("allowlist and dedupe (S2, S3)", () => {
       expect(await response.text()).toBe("");
     }
     expect(await count("processed_updates")).toBe(0);
-    expect(await count("events", "kind = 'ignored_update'")).toBe(3);
+    // Three ignored messages in one hour share a dedupe key (two only if the hour rolls over mid-test).
+    const ignored = await count("events", "kind = 'ignored_update'");
+    expect(ignored).toBeGreaterThanOrEqual(1);
+    expect(ignored).toBeLessThanOrEqual(2);
     const detail = await env.DB.prepare("SELECT detail_json FROM events LIMIT 1").first();
     expect(detail).toEqual({ detail_json: null });
   });

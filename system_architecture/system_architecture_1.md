@@ -8,7 +8,7 @@ Derived From: PRD_1.md
 | Date | 2026-10-15 |
 | Author | Divine Gima Folabit (owner) with Claude (System Designer) |
 | Status | **Locked for build** on Divine's delegated authority ("I leave you the liberty to ask, to answer, and close the gaps"). Four amendment candidates (§4.3) are flagged for Divine; none blocks Stage 1 of Essentials 1. |
-| Revision | **Rev-1, amended in place on 2026-10-16** after the `/plan-eng-review` of this version, at Divine's explicit instruction (an exception to the `claude.md` rule against in-place edits). Changed passages are tagged `[Rev-1]`; the full list is §18. Version number stays 1, so the PRD/architecture/essentials alignment and drift checks are unaffected. **Rev-2, same day:** Divine's decisions on amendments A-1 to A-4 (§4.3, ADR-035, ADR-036); tagged `[Rev-2]`. |
+| Revision | **Rev-1, amended in place on 2026-10-16** after the `/plan-eng-review` of this version, at Divine's explicit instruction (an exception to the `claude.md` rule against in-place edits). Changed passages are tagged `[Rev-1]`; the full list is §18. Version number stays 1, so the PRD/architecture/essentials alignment and drift checks are unaffected. **Rev-2, same day:** Divine's decisions on amendments A-1 to A-4 (§4.3, ADR-035, ADR-036); tagged `[Rev-2]`. **Rev-3, 2026-10-17:** records the outcomes of the Stage 1 and Stage 2 builds and Divine's decisions of that day (CPU gate result and the pre-computed-grids choice, A-1 path 2, measured football-data.org history depth), at Divine's explicit instruction; tagged `[Rev-3]`. Rev-3 only records facts and decisions already taken; the pre-computed-grids redesign itself is **not** part of this version and needs PRD_2 and a new architecture version (ADR-037). Version number stays 1. |
 | Source of truth order | `PRD_1.md` → this file → `/essentials/*` → code |
 
 ---
@@ -220,7 +220,7 @@ Rule: the repository layer exposes **batched** reads/writes; no per-match query 
 
 | ID | Proposed PRD change | Why | Blocks anything? |
 |---|---|---|---|
-| A-1 | Data section: football-data.co.uk is used for **3-season history and shots for all nine domestic leagues**, not only SPL | GR-04 | Live ingestion of co.uk is blocked until the legal register (§9.8) is signed off. [Rev-1] The terms check itself happens during Stage 1 so a negative answer is known early (ADR-032); the decision stays Divine's. **DECIDED 2026-10-16 [Rev-2, ADR-035]:** path 1 (preferred): if the Stage 1 terms check confirms that downloading the files by hand for personal use is allowed, Divine downloads them and loads them with `footy load-csv`; co.uk is never fetched automatically. Path 2 (fallback): football-data.org only, and the Scottish Premiership is dropped from v1 |
+| A-1 | Data section: football-data.co.uk is used for **3-season history and shots for all nine domestic leagues**, not only SPL | GR-04 | Live ingestion of co.uk is blocked until the legal register (§9.8) is signed off. [Rev-1] The terms check itself happens during Stage 1 so a negative answer is known early (ADR-032); the decision stays Divine's. **DECIDED 2026-10-16 [Rev-2, ADR-035]:** path 1 (preferred): if the Stage 1 terms check confirms that downloading the files by hand for personal use is allowed, Divine downloads them and loads them with `footy load-csv`; co.uk is never fetched automatically. Path 2 (fallback): football-data.org only, and the Scottish Premiership is dropped from v1. **OUTCOME 2026-10-16/17 [Rev-3]: Divine chose path 2** (signed in `docs/legal/source_terms_register.md`): football-data.org only, football-data.co.uk is not used at all (no hand downloads, no `footy load-csv`), the Scottish Premiership is dropped. The free plan was measured to return all three seasons asked for (§16), so history does not start empty |
 | A-2 | Security section: "The Cloudflare API token used by Actions is scoped to D1 only" → two tokens: **nightly workflow = D1-only**; **deploy workflow = Workers-scripts + D1 migrations scope, in a protected `production` environment** | Wrangler deploy cannot work with a D1-only token | No (ADR-018). **ACCEPTED 2026-10-16 [Rev-2].** Environments are unavailable on Free private repos, so `CF_DEPLOY_TOKEN` is a repo secret referenced only by `deploy.yml` (§9.7) |
 | A-3 | Deployment: move the cron from `0 1 * * *` to a non-top-of-hour minute such as `17 1 * * *` | GitHub documents that scheduled runs can be delayed at high-load times such as the top of the hour; 01:00 UTC is exactly that | No — watchdog covers a late run. **ACCEPTED 2026-10-16 [Rev-2, ADR-036]** |
 | A-4 | Non-functional: reply latency is not stated. Suggest "reply within 30 s of upload at p95" | Gives a testable target | No. **ACCEPTED 2026-10-16 [Rev-2, ADR-036]:** p95 ≤ 30 s, NFR-11 (the §14 wording of 15 s is superseded) |
@@ -869,7 +869,7 @@ flowchart LR
 │   └── migrations/                0001_*.sql ... (additive-first, never edited after merge)
 ├── scripts/                       set-webhook, smoke checks
 ├── docs/legal/                    source_terms_register.md (§9.8)
-└── .github/workflows/             ci.yml, deploy.yml, nightly.yml, backtest.yml
+└── .github/workflows/             ci.yml, deploy.yml, data.yml [Rev-3], nightly.yml, backtest.yml
 ```
 
 Rules: no raw source data (CSV, API dumps) is ever committed — tests use synthetic generators (ADR-025); secrets only in GitHub/Cloudflare secret stores; the bot imports nothing from `apps/fit` and vice versa; the only shared artifacts are `packages/contracts`, `data/`, and `db/migrations`.
@@ -1060,6 +1060,7 @@ Inputs per team from `team_form` (precomputed at fit time): season goals for/aga
 - **Fetch plan (nightly):** football-data.org — one request per competition (`PL, PD, BL1, SA, FL1, DED, PPL, ELC, CL`) for `dateFrom = today−7`, `dateTo = today+3`, spaced ≥ 6.5 s apart (≈ 60 s total, within 10/min). football-data.co.uk is **never fetched automatically** [Rev-2, ADR-035]: its CSV files are downloaded by hand and loaded with `footy load-csv`.
 - **Alias resolution:** every source team name is normalised and looked up in `team_aliases (source, alias_norm)`. Unknown → the match is skipped for training, an `events` row is written, and one deduped alert lists the unmapped names. Nothing is guessed. [Rev-1, ADR-027] Clubs that left the ten competitions during the window are listed in `data/historical_teams.json` (inactive rows with per-source aliases) so their matches are kept.
 - **Reconciliation:** the same match from two sources is joined on `(comp, season, home_team_id, away_team_id)` with a ±1 day date tolerance (SPL plays pairs several times per season, so the date tolerance matters there). Goals preference: football-data.org `score.regularTime` → `score.fullTime` when `duration=REGULAR` → co.uk `FTHG/FTAG`. If both sources have a score and disagree, the job keeps the football-data.org value, writes an `events` anomaly and fails the run with exit code `2` if more than 3 disagree (a signal of a parsing or mapping bug).
+- **[Rev-3] Under A-1 path 2 there is one source**, so the two-source join and the co.uk preference are not built. The disagreement rule is applied to a stored verified result that the source later reports differently: those rows are not written, an `anomaly_result_changed` event is recorded, and more than 3 in one run fails the run (exit code 2) and writes nothing. The free plan was seen to report a few finished matches as `TIMED` again; the forward-only status rule keeps the stored result and records a deduped `anomaly_status_regression` event. `fullTime` in football-data.org includes extra time and the shootout; only `regularTime` (or `fullTime` when `duration=REGULAR`) is a 90-minute score (checked against the v4 documentation).
 - **Result validity:** goals in 0..20; status transitions only forward; a `FINISHED` match with non-REGULAR duration and no `regularTime` → `result_basis='unverified'`.
 - **Freshness:** per competition, `max(match_date)` of finished matches is recorded in the run's `diagnostics_json`; `team_form.latest_match_date` lets the bot add "SPL data through <date>" notes (GR-17).
 - **Season rollover:** a competition's team list is compared with football-data.org's team list for that competition each night; a team in the source but not in `teams` raises a deduped alert ("canonical list needs a summer update").
@@ -1122,6 +1123,8 @@ Gate: if p95 over 20 production-like uploads exceeds **6 ms** (or any invocation
 
 [Rev-1] **Parked idea, not a decision (kept in the tracker):** the nightly job already holds the next 3 days of fixtures and could pre-compute and store each match's grid so the Worker only looks it up. That would replace F2/F3 and remove the TypeScript grid port, but it changes the PRD design, so it also needs an architecture version bump. Consider it only if the Stage 1 spike gives p95 above 6 ms.
 
+**[Rev-3] Stage 1 gate outcome (production, Workers Logs, `docs/verification.md` section 2):** the design as built missed the gate (p95 22 ms, max 63 ms over 73 requests). F1 as specified above was applied (hand validator, per-team rows, Poisson recurrence) and re-measured: p50 3 ms, **p95 16 ms**, max 22 ms over 39 requests; the first requests on a fresh isolate cost 22, 13, 9, 4 and 12 ms. The gate is still not met, F1 is exhausted, and because uploads arrive about once a day nearly every real upload is a cold request. **Divine decided on 2026-10-16 to take the pre-computed-grids idea (ADR-037).** F2, F3 and the paid plan were not adopted. The redesign (where grids are stored and how large, how many days of fixtures, the missing-grid fallback, the first-prediction-immutable rule, Python as the only grid implementation) belongs to PRD_2 and a new architecture version made in design chat. Until then this version stays the build scope; Stages 2 to 4 and 6 do not depend on the Worker grid code, and Stages 5 and 7 wait for the new version.
+
 ---
 
 ## 9. Cross-cutting concerns (design phase 8)
@@ -1154,10 +1157,11 @@ Gate: if p95 over 20 production-like uploads exceeds **6 ms** (or any invocation
 | Name | Used by | Stored in | Scope |
 |---|---|---|---|
 | `TELEGRAM_BOT_TOKEN` | Worker, fit job (alerts) | Worker secret; GitHub secret | Bot API |
-| `TELEGRAM_WEBHOOK_SECRET` | Worker | Worker secret | Header check |
+| `TELEGRAM_WEBHOOK_SECRET` | Worker; `deploy.yml` (`set-webhook`, smoke) [Rev-3] | Worker secret; GitHub secret | Header check |
 | `WEBHOOK_PATH_SECRET` | Worker, `set-webhook` script | Worker secret; GitHub secret | Route |
 | `ALLOWED_CHAT_ID`, `ALLOWED_USER_ID` | Worker | Worker vars/secrets | Allowlist |
-| `FD_ORG_TOKEN` | fit job | GitHub secret | football-data.org |
+| `FD_ORG_TOKEN` | fit job, `data.yml` | GitHub secret | football-data.org |
+| `WORKER_URL` [Rev-3] | `deploy.yml` (`set-webhook`, smoke) | GitHub secret | Public Worker URL (not a credential) |
 | `CF_D1_TOKEN`, `CF_ACCOUNT_ID`, `D1_DATABASE_ID` | fit job (nightly, backtest); local `footy load-csv` runs on Divine's machine (local environment variable, never committed) [Rev-2] | GitHub secrets | **D1 edit only** |
 | `CF_DEPLOY_TOKEN` | `deploy.yml` only | GitHub secret (environment secret if available — see §9.7) | Workers deploy + D1 migrations |
 
@@ -1180,6 +1184,7 @@ Approach: small, free, and sufficient for one user — structured logs, durable 
 | `ci.yml` | `pull_request` to `main` | none | Install with lockfiles; lint + typecheck (TS), ruff + mypy (Py); Vitest (Workers pool, local D1); pytest; golden-vector parity test (TS vs Python grids); migration lint (no `DROP`/`RENAME` in the same migration that adds a replacement; migrations apply cleanly to an empty D1 and to the previous schema); gitleaks; "no data files" check (no CSV/JSON dump above size threshold outside `packages/contracts` and `data/`); whole-nightly-job test (ingest, score, fit, publish on synthetic fixtures with a SQLite-backed fake D1 client) [Rev-1] |
 | `deploy.yml` | `push` to `main` | `CF_DEPLOY_TOKEN` | Guard: verify head commit belongs to a merged pull request; apply D1 migrations; `wrangler deploy`; run `scripts/set-webhook`; post-deploy smoke (wrong-header request → 401; `/healthz`-equivalent) |
 | `nightly.yml` | `schedule` (`17 1 * * *`, A-3 accepted [Rev-2]) + `workflow_dispatch` | D1 token, Telegram, `FD_ORG_TOKEN` | `ingest → score → fit → publish`, Monday also `report`; step `if: failure()` sends a Telegram alert; `concurrency` group prevents overlapping runs; `timeout-minutes: 45` |
+| `data.yml` [Rev-3] | `workflow_dispatch` only, `main` only | `FD_ORG_TOKEN`, D1 token | Manual runs of `footy bootstrap --dry-run`, `footy bootstrap`, `footy ingest` and `python -m footy.repo.d1_probe`; the chosen command reaches the shell only as an environment variable. Scheduled use is `nightly.yml` in Stage 7 |
 | `backtest.yml` | monthly schedule + manual | D1 read token scope (same D1 token) | Walk-forward backtest on stored matches; compares to the baseline and to the previous report; fails on a regression beyond tolerance (informational alert, not a deploy block) |
 
 Rollback: Worker — redeploy the previous commit (revert PR); model run — repoint `active_run` to a retained `superseded` run (§8.6); schema — forward-only fixes (additive-first rule).
@@ -1237,8 +1242,8 @@ Personal, non-commercial, probabilities-only use; no odds, no staking advice, no
 
 | Source / service | How used | Status | Gate |
 |---|---|---|---|
-| football-data.org (free tier) | Automated nightly API calls, token auth, ≤ 10 req/min | Terms and free-tier history depth **to verify at build** | `SOURCE_ENABLED_FDORG` default off until recorded in `docs/legal/source_terms_register.md` |
-| football-data.co.uk | [Rev-2] Files downloaded **by hand** by Divine and loaded locally, for history, shots and Scottish Premiership; no automated fetching | Site wording seen in the design session: intended for private individuals, **not commercial or data-training products using automated bots/scrapers/AI**. Automated fetching is not used. Whether hand downloading for personal use is acceptable is confirmed by the Stage 1 terms check | `SOURCE_ENABLED_FDUK` default off. **A-1 decided [Rev-2, ADR-035].** Path 1 (preferred), if the Stage 1 check confirms hand downloading for personal use is allowed: Divine downloads the files and loads them with `footy load-csv`; `SOURCE_ENABLED_FDUK` stays off permanently and there is no co.uk HTTP client. Path 2 (fallback), if not allowed: football-data.org only, and the Scottish Premiership is dropped from v1 (SPL matches are then omitted as `INSUFFICIENT_HISTORY`, the screener prompt stops listing SPL, shots stay unused). [Rev-1, ADR-032] The terms check and the football-data.org free-history-depth check are done during Stage 1. If football-data.org history is current-season only, most teams stay under 10 matches (`INSUFFICIENT_HISTORY`) for weeks (warm-up: predictions start as teams reach 10 matches) [Rev-2] |
+| football-data.org (free tier) | Automated nightly API calls, token auth, ≤ 10 req/min | Terms and free-tier history depth **to verify at build**. **[Rev-3] Register signed 2026-10-16 (enable); free plan measured to return 3 seasons (§16)** | `SOURCE_ENABLED_FDORG` default off; set to `1` only by the manual `data` workflow, now that the entry is signed |
+| football-data.co.uk | [Rev-2] Files downloaded **by hand** by Divine and loaded locally, for history, shots and Scottish Premiership; no automated fetching | Site wording seen in the design session: intended for private individuals, **not commercial or data-training products using automated bots/scrapers/AI**. Automated fetching is not used. Whether hand downloading for personal use is acceptable is confirmed by the Stage 1 terms check | `SOURCE_ENABLED_FDUK` default off. **A-1 decided [Rev-2, ADR-035].** Path 1 (preferred), if the Stage 1 check confirms hand downloading for personal use is allowed: Divine downloads the files and loads them with `footy load-csv`; `SOURCE_ENABLED_FDUK` stays off permanently and there is no co.uk HTTP client. Path 2 (fallback), if not allowed: football-data.org only, and the Scottish Premiership is dropped from v1 **[Rev-3: path 2 was chosen on 2026-10-16; co.uk is not used]** (SPL matches are then omitted as `INSUFFICIENT_HISTORY`, the screener prompt stops listing SPL, shots stay unused). [Rev-1, ADR-032] The terms check and the football-data.org free-history-depth check are done during Stage 1. If football-data.org history is current-season only, most teams stay under 10 matches (`INSUFFICIENT_HISTORY`) for weeks (warm-up: predictions start as teams reach 10 matches) [Rev-2] |
 | soccernews.com and league/UEFA pages | Read by the Claude Project (manual, by Divine) — not by this system | Personal/non-commercial; site is affiliate-linked | Outside system boundary; noted only |
 | Telegram Bot API | Messaging | Standard bot use | none |
 | Cloudflare, GitHub | Hosting, CI | Free-plan terms | none |
@@ -1331,7 +1336,7 @@ Status values: Accepted (locked), Accepted-hypothesis (locked but validated by b
 | 010 | Results use 90 minutes + stoppage only (`score.regularTime`), else `unverified` | PRD §10; extra time/penalties distort | Full-time incl. ET | Needs source field check at build |
 | 011 | Auth = path secret + webhook header + chat/user allowlist behind one `auth` module | Single user; layered cheap controls | Telegram login widget; passwords | Locked extensibility rule satisfied |
 | 012 | Idempotency: `update_id` dedupe; first prediction per `fixture_key` immutable; key = `date|comp|home_id|away_id` | Retries and re-uploads must not change history | Using the screener `match_id` (opaque, unstable format) | Same numbers on re-upload |
-| 013 | CPU risk handled by a measured gate (p95 ≤ 6 ms) and F1→F3 fallback ladder; acknowledge fast, compute via `waitUntil` only to avoid Telegram retries | `waitUntil` does not lift the CPU limit — PRD rationale corrected | Assume it fits | **Accepted-hypothesis:** spike in Essentials 1 Stage 1; re-check in Stages 5 and 7. F3 would be a new architecture version |
+| 013 | CPU risk handled by a measured gate (p95 ≤ 6 ms) and F1→F3 fallback ladder; acknowledge fast, compute via `waitUntil` only to avoid Telegram retries | `waitUntil` does not lift the CPU limit — PRD rationale corrected | Assume it fits | **Accepted-hypothesis:** spike in Essentials 1 Stage 1; re-check in Stages 5 and 7. F3 would be a new architecture version. **[Rev-3] Spike run: gate failed after F1 (p95 16 ms); superseded in direction by ADR-037** |
 | 014 | Repository layers (TS, Python) own all SQL; forward-only additive migrations | Locked extensibility rules | ORM everywhere | CI grep check |
 | 015 | Watchdog cron in the Worker + STALE MODELS banner (> 36 h) | Scheduled workflows can silently not run | Rely on Actions failure alert | Worker has a scheduled handler |
 | 016 | Weekly calibration report pushed by the fit job as message + chart; no bot commands in v1 | Smaller attack surface | `/report` command | Additive later |
@@ -1355,8 +1360,10 @@ Status values: Accepted (locked), Accepted-hypothesis (locked but validated by b
 | 034 | [Rev-1] The UCL final is treated like any match; the UCL note says it may be neutral; no `NEUTRAL_VENUE` code | The bot cannot detect it (no venue field); one match a year | Omit via a date list | Resolves the GR-22 vs R-M6 conflict |
 | 035 | [Rev-2] A-1 decided: football-data.co.uk is never fetched automatically; its CSV files are hand-downloaded and loaded locally with `footy load-csv` if the Stage 1 terms check allows it; otherwise football-data.org only and the Scottish Premiership is dropped | Site terms bar automated bots and AI data-training use; the decision rule was set by Divine | Automated co.uk fetching; football-data.org only from the start | Weekly manual file load for SPL freshness; no co.uk HTTP client in the nightly job |
 | 036 | [Rev-2] A-3 and A-4 accepted: nightly cron `17 1 * * *` (01:17 UTC, 06:47 IST); reply p95 ≤ 30 s from upload to first message | GitHub delays top-of-hour schedules; a testable latency target | `0 1 * * *`; no target; 15 s target | NFR-11 |
+| 037 | [Rev-3] Direction chosen by Divine on 2026-10-16 after the failed CPU gate: the nightly job pre-computes and stores each upcoming match's grid and the Worker looks it up (removes the TypeScript grid port). **Design not yet written** | Production p95 16 ms after F1 against a 6 ms target; uploads are about daily so requests are cold | F2 split, F3 offload to Actions, Workers Paid plan, accept the risk | Needs PRD_2, architecture_2 and essentials_2 from design chat; changes Stages 5 and 7; golden-vector parity (§8.1) would no longer be needed for the Worker |
+| 038 | [Rev-3] Stage 2 data commands run as a manual `data` workflow (`workflow_dispatch`, main only) with `SOURCE_ENABLED_FDORG` set in that workflow, until `nightly.yml` exists in Stage 7 | Lets bootstrap, dry-run, ingest and the D1 probe run with stored secrets and no pasting | Run locally with pasted tokens | One more workflow to maintain; the flag is set only after the register entry is signed |
 
-**Amendments decided by Divine on 2026-10-16 [Rev-2]:** A-1 decided (ADR-035: hand-downloaded co.uk files if the Stage 1 check allows it, otherwise football-data.org only and the Scottish Premiership dropped); A-2 accepted (two Cloudflare tokens, ADR-018); A-3 accepted (cron `17 1 * * *`, ADR-036); A-4 accepted (reply p95 ≤ 30 s, NFR-11, ADR-036). Only open item: whether the Stage 1 terms check allows hand downloading, which selects path 1 or path 2 of A-1.
+**Amendments decided by Divine on 2026-10-16 [Rev-2]:** A-1 decided (ADR-035: hand-downloaded co.uk files if the Stage 1 check allows it, otherwise football-data.org only and the Scottish Premiership dropped); A-2 accepted (two Cloudflare tokens, ADR-018); A-3 accepted (cron `17 1 * * *`, ADR-036); A-4 accepted (reply p95 ≤ 30 s, NFR-11, ADR-036). **[Rev-3] A-1 resolved on 2026-10-16/17: path 2 (football-data.org only, Scottish Premiership dropped).** Only open item: whether the Stage 1 terms check allows hand downloading, which selects path 1 or path 2 of A-1.
 
 ---
 
@@ -1438,6 +1445,12 @@ R-L1 co.uk terms for hand downloading (§9.8, checked in Stage 1; no automated u
 
 [Rev-1, ADR-032] Items 1, 2 and 6 are checked during Stage 1, not at the start of Stage 2.
 
+**[Rev-3] Outcomes recorded 2026-10-17 (details in `docs/verification.md`):**
+- Item 1: football-data.org free plan returned all three seasons requested (2024-25, 2025-26, 2026-27) for all nine competitions it covers (9,280 matches); `score.regularTime` and `score.duration` exist; `fullTime` includes extra time and the shootout; written terms were not found and the entry was signed on the stated free-plan use.
+- Item 2: resolved by decision, not by a permission: A-1 path 2, co.uk not used. CSV headers were therefore never needed.
+- Item 3: the D1 REST API accepted batches of 10 statements and statements of up to 100 bound parameters in the production bootstrap. Batch atomicity is still not confirmed against the live service.
+- Item 7: Worker CPU gate failed (p95 22 ms, then 16 ms after F1); see §8.10 and ADR-037.
+
 **Source-file finding:** `SYETEM DESIGN RULES.html` in the project contains only a saved, empty claude.ai chat shell — no rules. Operative rules therefore come from the project instructions, `system_architecture.md.md` (house format), the C4 resource, and the other resources. Divine should re-upload the intended rules file if it exists.
 
 ---
@@ -1492,4 +1505,17 @@ Applied in place after `/plan-eng-review`, at Divine's explicit instruction. The
 | A-3 (Rev-2) | Nightly cron `17 1 * * *` (01:17 UTC, 06:47 IST) accepted | §4.3, §7.5, §7.9, §9.3, ADR-036 |
 | A-4 (Rev-2) | Reply p95 ≤ 30 s accepted as NFR-11 | §2.2, §4.3, ADR-036 |
 
-A-1 to A-4 are decided (Rev-2). The only open item is whether the Stage 1 terms check allows hand downloading, which selects path 1 or path 2 of A-1.
+A-1 to A-4 are decided (Rev-2). [Rev-3] A-1 resolved to path 2.
+
+### Rev-3 (2026-10-17): outcomes of the Stage 1 and Stage 2 builds
+
+Recorded at Divine's explicit instruction after a code review of Stages 1 and 2. No requirement changed in this version; direction changes are logged as decisions and handed to design chat.
+
+| Ref | Change | Where |
+|---|---|---|
+| ADR-037 | CPU gate failed after F1; Divine chose pre-computed grids; redesign pending in PRD_2 / architecture_2 | §8.10, §14 |
+| A-1 outcome | Path 2: football-data.org only, co.uk unused, Scottish Premiership dropped; free plan returns 3 seasons | §4.3, §9.8, §16 |
+| §8.5 | One-source disagreement rule, forward-only status protection, `fullTime` caveat | §8.5 |
+| ADR-038 | Manual `data` workflow for Stage 2 commands | §7.6, §9.3, §14 |
+| Inventory | `TELEGRAM_WEBHOOK_SECRET` and `WORKER_URL` are also GitHub secrets | §9.1 |
+| Ledger | Verify-at-build items 1, 2, 3 and 7 resolved or answered | §16 |
