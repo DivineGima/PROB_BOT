@@ -137,3 +137,19 @@ def test_stronger_shrinkage_pulls_teams_toward_the_league_mean(world) -> None:  
         return float(np.std([v[0] for v in m.teams.values()]))
 
     assert spread(tight) < spread(loose)
+
+
+def test_defaults_leave_room_for_real_data_and_the_tolerance_is_recorded() -> None:
+    # Production folds needed more than the old cap of 500 iterations (bivariate Poisson).
+    cfg = FitConfig()
+    assert cfg.max_iterations >= 2000
+    assert cfg.as_dict()["tolerance"] == cfg.tolerance == 1e-10
+
+
+def test_a_looser_tolerance_reaches_the_same_optimum(world) -> None:  # type: ignore[no-untyped-def]
+    tight, a = fit_dixon_coles(
+        world.matches, world.leagues, world.as_of, FitConfig(tolerance=1e-12)
+    )
+    loose, b = fit_dixon_coles(world.matches, world.leagues, world.as_of, FitConfig())
+    assert float(b["objective"]) == pytest.approx(float(a["objective"]), abs=1e-4)  # type: ignore[arg-type]
+    assert tight.lambdas(1, 15)[0] == pytest.approx(loose.lambdas(1, 15)[0], abs=1e-3)

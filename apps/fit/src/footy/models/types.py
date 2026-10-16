@@ -42,7 +42,8 @@ class FitConfig:
     max_abs_strength: float = 2.0  # sanity: |attack| and |defence| of every team
     min_mean_lambda: float = 0.3  # sanity: mean fitted rate per competition
     max_mean_lambda: float = 3.5
-    max_iterations: int = 500
+    max_iterations: int = 3000  # the real data needed more than 500 in a few folds (bp)
+    tolerance: float = 1e-10  # relative objective change that stops the optimiser
     min_matches: int = 50  # refuse to fit on fewer weighted rows than this
 
     def as_dict(self) -> dict[str, object]:
@@ -57,6 +58,7 @@ class FitConfig:
             "min_mean_lambda": self.min_mean_lambda,
             "max_mean_lambda": self.max_mean_lambda,
             "max_iterations": self.max_iterations,
+            "tolerance": self.tolerance,
             "min_matches": self.min_matches,
         }
 
