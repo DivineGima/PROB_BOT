@@ -192,3 +192,20 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 
 ### Open issues
 1. CPU gate (above). 2. Live D1 probe (verify item 3) not yet run (needs the nightly token and a shell). 3. Legal register unsigned; A-1 undecided. 4. `data/historical_teams.json` for Stage 2. 5. Missing rules file, git identity, `claude.md` in-place-edit exception.
+
+---
+
+## 2026-10-16 (night) — F1 applied and re-measured; CPU gate still FAILS, decision handed to Divine (in-progress)
+
+- **Built against:** `PRD_1.md`, `system_architecture_1.md`, `system_architecture_essential_1.md` (all N=1). Stage 1 is **in-progress**.
+- **Done:** PR #7 applied the F1 trims (hand validator instead of Zod, per-team model rows, Poisson recurrence) and was deployed as Worker version bd061009. Outputs are unchanged (regression tests pin the old results; 1,500-payload validator equivalence test).
+- **CPU gate after F1** (production, Workers Logs, 39 spike requests, all 200): p50 3 ms (was 6), **p95 16 ms** (was 22), max 22 ms (was 63); 4 of 39 at or above 10 ms (was 22% of requests). Without the first five requests p95 is 6 ms but one request still took 16 ms. The first requests of a fresh isolate cost 22, 13, 9, 4, 12 ms. Table and series: `docs/verification.md` section 2.
+- **Verdict:** the gate (p95 at most 6 ms, nothing near 10 ms) is not met. F1 is exhausted. Because uploads arrive about once a day, nearly every real upload will be a cold-isolate request, and the spike still excludes grammY, D1 and Telegram subrequests.
+- **Needs Divine (architecture decision, nothing adopted):** choose how to proceed. Options: (a) the parked "nightly pre-computed grids" idea (the nightly job stores each match's grid; the Worker only looks them up; needs a PRD bump and a new architecture version); (b) F2, split the work across several invocations; (c) F3, offload to GitHub Actions; (d) accept the risk on the Free plan, given Cloudflare's tolerance for occasional overruns, with an explicit ADR (not recommended: cold requests are the normal case); (e) the Workers Paid plan, which lifts the CPU limit (cost decision). Stage 2 (ingestion, fit) does not depend on the Worker grid code, but it has its own legal gate (register unsigned, A-1 undecided, `data/historical_teams.json` missing).
+- **Still pending:** switch `SPIKE_ENABLED` back to `"0"`; fold the deferred `docs/setup.md` C8 rewrite into a docs PR; live D1 probe.
+
+### Module status
+| Module | Status |
+|---|---|
+| Stage 1: Foundations and CPU spike | **in-progress** (deployed; CPU gate failed after F1, awaiting Divine's decision) |
+| Stages 2 to 7 | not started |
