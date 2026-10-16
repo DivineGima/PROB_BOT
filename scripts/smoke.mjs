@@ -17,17 +17,18 @@ export async function runSmoke({ workerUrl, pathSecret, botToken, fetchImpl = fe
   const checks = [];
   /**
    * @param {string} name
-   * @param {number} expected
+   * @param {number | number[]} expected one accepted status, or several
    * @param {string} path
    * @param {RequestInit} init
    */
   const expectStatus = async (name, expected, path, init) => {
+    const accepted = Array.isArray(expected) ? expected : [expected];
     try {
       const response = await fetchImpl(`${origin}${path}`, init);
       checks.push({
         name,
-        ok: response.status === expected,
-        detail: `HTTP ${response.status}, expected ${expected}`,
+        ok: accepted.includes(response.status),
+        detail: `HTTP ${response.status}, expected ${accepted.join(" or ")}`,
       });
     } catch (error) {
       checks.push({
@@ -53,8 +54,10 @@ export async function runSmoke({ workerUrl, pathSecret, botToken, fetchImpl = fe
   });
   await expectStatus("GET on the root is 404 (worker is up)", 404, "/", { method: "GET" });
   await expectStatus(
-    "spike path is closed (404) unless deliberately enabled",
-    404,
+    // 404 while SPIKE_ENABLED=0 (route closed); 401 while it is deliberately on (route open but the
+    // header check still rejects the caller). Either way an unauthenticated caller gets nothing.
+    "spike path rejects unauthenticated callers (404 off, 401 on)",
+    [404, 401],
     `/spike/${pathSecret}`,
     {
       method: "POST",
