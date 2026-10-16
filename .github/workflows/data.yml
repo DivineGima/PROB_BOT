@@ -1,0 +1,68 @@
+name: data
+
+# Manual runs of the fit job's data commands (architecture sections 6.7 and 9.3). The nightly
+# schedule arrives with Stage 7 (nightly.yml). Secrets stay in GitHub; nothing is pasted anywhere.
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "What to run"
+        type: choice
+        required: true
+        default: bootstrap-dry-run
+        options:
+          - bootstrap-dry-run
+          - bootstrap
+          - ingest
+          - d1-probe
+      seasons:
+        description: "Seasons for bootstrap, newest first (1 to 10)"
+        type: string
+        required: false
+        default: "3"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: footy-data
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: footy ${{ inputs.command }}
+    # Only the reviewed code on main may touch the database (CLAUDE.md: no unreviewed deploys).
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned, hash-checked dependencies
+        run: python -m pip install --require-hashes -r apps/fit/requirements.txt
+      - name: Run
+        working-directory: apps/fit
+        env:
+          # Inputs reach the shell only as environment variables, never inside the script text.
+          COMMAND: ${{ inputs.command }}
+          SEASONS: ${{ inputs.seasons }}
+          PYTHONPATH: src
+          # The legal register entry for football-data.org is signed (docs/legal/source_terms_register.md).
+          SOURCE_ENABLED_FDORG: "1"
+          FD_ORG_TOKEN: ${{ secrets.FD_ORG_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          CF_D1_TOKEN: ${{ secrets.CF_D1_TOKEN }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          case "$COMMAND" in
+            bootstrap-dry-run) python -m footy.cli bootstrap --dry-run --seasons "$SEASONS" ;;
+            bootstrap)         python -m footy.cli bootstrap --seasons "$SEASONS" ;;
+            ingest)            python -m footy.cli ingest ;;
+            d1-probe)          python -m footy.repo.d1_probe ;;
+            *) echo "unknown command" >&2; exit 64 ;;
+          esac

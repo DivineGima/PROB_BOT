@@ -237,3 +237,19 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 - **Consequences of path 2 (architecture ADR-035):** no 3-season history from co.uk and no shots; SPL gets `INSUFFICIENT_HISTORY` and the screener prompt stops listing it. If the free tier returns only the current season, most teams stay under 10 matches for weeks (warm-up). The free-history depth is the open measurement: one authenticated request for a past season, after Stage 2 starts.
 - **Data files added:** `data/canonical_teams.json` (generated from PRD_1 section 12; 179 clubs, counts match the PRD table) and `data/historical_teams.json` (**DRAFT**, 59 history-only clubs from memory, cross-checked against the 2026-27 lists; 9 marked `verify`; SPL clubs left out; Divine to review). Per-source aliases come in Stage 2 under `data/aliases/`.
 - **Module status:** Stage 1 complete. Stage 2 not started.
+
+---
+
+## 2026-10-17 — Stage 2 built (ingestion, aliases, bootstrap); live runs pending (in-progress)
+
+- **Built against:** `PRD_1.md`, `system_architecture_1.md`, `system_architecture_essential_1.md` (all N=1), under A-1 **path 2** (football-data.org only; co.uk not used; SPL dropped).
+- **Done (code, tests green: 187 pytest, ruff, mypy strict, repo rule checks):**
+  - Migration `0002` (competitions, teams, team_aliases, matches, source_fetch_log); additive, forward-only.
+  - `footy.aliases` (normaliser with FC/AFC rule, resolver, validated seed loader), `data/aliases/fd_org.json` (best-effort spellings; the dry-run's unmapped report corrects it).
+  - `footy.ingest` (paced football-data.org client with bounded retries, strict payload parser, `bootstrap` and `ingest` pipelines), `footy.reconcile` (ADR-010 90-minute rule, forward-only status, disagreement limit of 3, natural-key clash handling), repository modules in `footy/repo` (the only SQL), `footy` CLI with exit codes 0/1/2/3.
+  - `.github/workflows/data.yml` (manual: `bootstrap-dry-run`, `bootstrap`, `ingest`, `d1-probe`), main-only, secrets from GitHub.
+  - football-data.org v4 facts checked in the official docs (`docs/verification.md` section 4). Notable: `fullTime` includes extra time and the shootout; `regularTime` is the 90-minute score.
+- **Not built (by decision/stage):** co.uk CSV loader and the two-source +/-1-day join (path 2 drops co.uk); Telegram alert sending (Stage 7; Stage 2 writes the deduped `events` rows it will send); score/fit/publish commands (later stages).
+- **Open before Stage 2 can be called complete (needs live runs, user starts them from the Actions tab):** (1) `bootstrap-dry-run` to measure free-history depth and list unmapped club names; (2) alias fixes from that report; (3) `bootstrap`; (4) `ingest`; (5) exit criteria check: matches populated and consistent, zero unmapped or a documented list; (6) optional `d1-probe`.
+- **Risks to watch:** free tier may return only the current season, which means teams stay below 10 matches for weeks (warm-up) and the UCL-only clubs likely stay INSUFFICIENT_HISTORY; the `fd_org.json` spellings are unverified until the dry-run.
+- **Module status:** Stage 2: code `complete`, live verification `in-progress`. Stages 3 to 7 not started.

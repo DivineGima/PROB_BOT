@@ -6,7 +6,7 @@ What was verified, how, and what is still open. Numbers marked **indicative** ar
 
 | # | Item | Status | Evidence |
 |---|---|---|---|
-| 1 | football-data.org free-history depth, fields, terms | **Open, reported to Divine.** Free-tier history depth is not stated on any official page; written terms were not found | `docs/legal/source_terms_register.md` section 1. Settling it needs an authenticated request, blocked by the legal gate |
+| 1 | football-data.org free-history depth, fields, terms | **Open.** The register is now signed (2026-10-16). Fields and parameters are confirmed from the v4 docs (section 4). The free-history depth is settled by `footy bootstrap --dry-run` (workflow `data`, command `bootstrap-dry-run`); result goes in section 4 | `docs/legal/source_terms_register.md` section 1, section 4 below |
 | 2 | football-data.co.uk terms for hand download; CSV headers | **Checked, not conclusive.** The site is "for private individuals" and "league match prediction only"; manual download is not addressed. CSV column headers are verified in Stage 2 against hand-written fixtures | Register section 2 |
 | 3 | D1 REST batch support and the 100-bound-parameter limit | **Partly verified.** The OpenAPI spec accepts `{"batch": [...]}` and a single `{sql, params}`. The 100-parameter limit and batch atomicity are **not confirmed from documentation**; the live probe `python -m footy.repo.d1_probe` answers both once a real D1 exists. The client enforces 100 and is tested against a fake. | Cloudflare API spec, `d1_probe.py`, `tests/test_d1_probe.py` |
 | 4 | Workers Logs retention; D1 Time Travel retention (Free) | **Workers Logs: 3 days on Free** (7 days from the 2026-12-01 observability pricing change). Pull `cpuTime` within 3 days of the spike. **Time Travel retention: not confirmed** in this session; check in the dashboard before the Stage 7 restore drill | Cloudflare docs, Workers pricing page |
@@ -80,3 +80,11 @@ Against the pre-F1 runs: p50 6 to 3 ms, p95 22 to 16 ms, requests at or above 10
 | Secret scan | `gitleaks detect --no-git` | no leaks (fake test values allowlisted by exact value in `.gitleaks.toml`) |
 
 Mutation checks done by hand (each breaks one behavior and the suite must fail): auth compare always true, group chats allowed, dedupe always "first time", D1 parameter cap removed, client errors retried, resume key ignoring data. Every one was caught.
+
+## 4. football-data.org v4 facts used by Stage 2 (checked against docs.football-data.org on 2026-10-17)
+
+- `GET /v4/competitions/{id}/matches` filters: `season` (integer; the example `season=2021` is the 2021/22 season, so the start year), `dateFrom` and `dateTo` (`yyyy-MM-dd`, used together), `status`, `matchday`, `stage`, `group`. No maximum date range is documented; the nightly window is 10 days. `GET /v4/competitions/{id}/teams` takes `season`.
+- Statuses: `SCHEDULED, TIMED, IN_PLAY, PAUSED, FINISHED, SUSPENDED, POSTPONED, CANCELLED, AWARDED`. The table accepts `IN_PLAY` for both `IN_PLAY` and `PAUSED`.
+- Score: `duration` is `REGULAR`, `EXTRA_TIME` or `PENALTY_SHOOTOUT`. **`fullTime` is the final score and includes extra time and the shootout** (the docs' sample shows 7-6 for a penalty decision), so it is the 90-minute score only when `duration` is `REGULAR`. `regularTime` holds the goals after 90 minutes. This is exactly the ADR-010 rule implemented in `footy.reconcile`: `regularTime` first (`result_basis='regular'`), else `fullTime` when `duration=REGULAR` (`'ft_90'`), else `unverified` with NULL goals.
+- Free plan: 10 requests per minute (we pace at 6.5 s). The docs do not say which seasons the free plan returns. A `403` means a restricted resource (paid subscription needed); the client reports it as "not available on this plan" and carries on.
+- **Free-history depth:** not yet measured. Run the `bootstrap-dry-run` command; the report's `history_depth` shows `ok` or `restricted` per competition and season.

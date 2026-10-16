@@ -11,6 +11,7 @@ import pytest
 
 MIGRATIONS = Path(__file__).resolve().parents[3] / "db" / "migrations"
 STAGE_1_TABLES = {"events", "job_runs", "processed_updates", "uploads"}
+STAGE_2_TABLES = {"competitions", "teams", "team_aliases", "matches", "source_fetch_log"}
 
 
 def migration_files() -> list[Path]:
@@ -43,19 +44,19 @@ def test_migration_files_are_sequential_and_named() -> None:
         assert name.startswith(f"{index:04d}_"), f"gap or misnumbering at {name}"
 
 
-def test_applies_cleanly_to_an_empty_database_and_creates_only_stage_1_tables(
+def test_applies_cleanly_to_an_empty_database_and_creates_only_stage_1_and_2_tables(
     db: sqlite3.Connection,
 ) -> None:
     apply(db, migration_files())
-    assert tables(db) >= STAGE_1_TABLES
+    assert tables(db) >= STAGE_1_TABLES | STAGE_2_TABLES
     # ADR-033: later-stage tables must not exist yet.
-    assert not {"matches", "teams", "predictions", "model_runs"} & tables(db)
+    assert not {"predictions", "omissions", "model_runs", "active_run", "model_params"} & tables(db)
 
 
 def test_applies_step_by_step_on_top_of_the_previous_schema(db: sqlite3.Connection) -> None:
     for path in migration_files():
         apply(db, [path])
-    assert tables(db) >= STAGE_1_TABLES
+    assert tables(db) >= STAGE_1_TABLES | STAGE_2_TABLES
 
 
 def test_uploads_defaults_to_received_and_checks_status(db: sqlite3.Connection) -> None:
@@ -98,3 +99,54 @@ def test_expected_indexes_exist(db: sqlite3.Connection) -> None:
         "idx_events_dedupe",
         "idx_job_runs_kind_started",
     } <= names
+
+
+def test_stage_2_schema_has_the_expected_indexes_and_keys(db: sqlite3.Connection) -> None:
+    apply(db, migration_files())
+    indexes = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    assert {
+        "idx_matches_home_date",
+        "idx_matches_away_date",
+        "idx_matches_comp_date",
+        "idx_matches_status_date",
+        "idx_team_aliases_team",
+        "idx_source_fetch_log_source_at",
+    } <= indexes
+    db.execute("INSERT INTO competitions (comp_code, name) VALUES ('EPL', 'Premier League')")
+    with pytest.raises(sqlite3.IntegrityError):  # comp_code is restricted to the ten codes
+        db.execute("INSERT INTO competitions (comp_code, name) VALUES ('XXX', 'Nope')")
+    db.execute("INSERT INTO teams (canonical_name, home_comp) VALUES ('A', 'EPL'), ('B', 'EPL')")
+    with pytest.raises(sqlite3.IntegrityError):  # canonical names are unique
+        db.execute("INSERT INTO teams (canonical_name) VALUES ('A')")
+    with pytest.raises(sqlite3.IntegrityError):  # foreign key to competitions
+        db.execute("INSERT INTO teams (canonical_name, home_comp) VALUES ('C', 'LL')")
+
+
+def test_matches_rules_in_the_schema(db: sqlite3.Connection) -> None:
+    apply(db, migration_files())
+    db.execute("INSERT INTO competitions (comp_code, name) VALUES ('EPL', 'Premier League')")
+    db.execute("INSERT INTO teams (canonical_name) VALUES ('A'), ('B')")
+    insert = (
+        "INSERT INTO matches (comp_code, season, match_date, home_team_id, away_team_id, status, "
+        "goals_home, goals_away, result_basis, fd_match_id, updated_at) "
+        "VALUES ('EPL', '2025-26', '2025-10-18', ?, ?, ?, ?, ?, ?, ?, 't')"
+    )
+    db.execute(insert, (1, 2, "FINISHED", 2, 1, "ft_90", 100))
+    for args in [
+        (1, 1, "FINISHED", 2, 1, "ft_90", 101),  # a team cannot play itself
+        (2, 1, "PAUSED", None, None, None, 102),  # status outside the allowed list
+        (2, 1, "FINISHED", 21, 0, "ft_90", 103),  # goals above 20
+        (2, 1, "FINISHED", -1, 0, "ft_90", 104),
+        (2, 1, "FINISHED", 1, 0, "guess", 105),  # unknown result basis
+        (1, 2, "FINISHED", 0, 0, "ft_90", 106),  # same fixture again (natural key)
+        (2, 1, "FINISHED", 0, 0, "ft_90", 100),  # same source id again
+    ]:
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute(insert, args)
+    db.execute(insert, (2, 1, "SCHEDULED", None, None, None, None))  # goals may be NULL
+    db.execute(
+        insert.replace("'2025-10-18'", "'2025-10-25'"), (1, 2, "SCHEDULED", None, None, None, None)
+    )
+    assert db.execute("SELECT COUNT(*) FROM matches").fetchone() == (
+        3,
+    )  # several NULL fd ids are fine
