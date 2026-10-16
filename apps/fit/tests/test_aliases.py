@@ -211,3 +211,30 @@ def test_loader_reports_missing_and_invalid_json(tmp_path: Path) -> None:
     (tmp_path / "canonical_teams.json").write_text("[1]", encoding="utf-8")
     with pytest.raises(DataError, match="JSON object"):
         load_reference(tmp_path)
+
+
+# Spellings football-data.org actually used that the first bootstrap dry-run reported as unknown
+# (2026-10-17). They are names only, not source data.
+DRY_RUN_FINDINGS = {
+    "CD Tondela": "Tondela",
+    "ES Troyes AC": "Troyes",
+    "FK Kairat": "Kairat Almaty",
+    "FK Shakhtar Donetsk": "Shakhtar Donetsk",
+    "LASK Linz": "LASK",
+    "PAE AEK": "AEK Athens",
+    "PAE Olympiakos SFP": "Olympiacos",
+    "Paphos FC": "Pafos",
+    "RC Deportivo La Coruña": "Deportivo A Coruña",
+    "SBV Excelsior": "Excelsior",
+    "SC Cambuur-Leeuwarden": "Cambuur",
+    "SC Farense": "Farense",
+    "SV 07 Elversberg": "Elversberg",
+    "Sport Lisboa e Benfica": "Benfica",
+    "Telstar 1963": "Telstar",
+}
+
+
+@pytest.mark.parametrize(("spelling", "canonical"), sorted(DRY_RUN_FINDINGS.items()))
+def test_spellings_found_by_the_first_dry_run_resolve(spelling: str, canonical: str) -> None:
+    resolver = Resolver("fd_org", load_reference().aliases["fd_org"])
+    assert resolver.resolve(spelling) == canonical
