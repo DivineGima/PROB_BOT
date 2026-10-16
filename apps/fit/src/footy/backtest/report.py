@@ -62,6 +62,14 @@ def format_report(summary: Mapping[str, object], sweep: Sequence[Mapping[str, ob
     failures = summary.get("fold_failures")
     if isinstance(failures, dict) and any(failures.values()):
         lines += ["", f"Folds where a model failed to fit: {failures}"]
+        details = summary.get("fold_failure_details")
+        if isinstance(details, list):
+            for d in details:
+                if isinstance(d, dict):
+                    lines.append(
+                        f"  {d.get('model')} fold {d.get('fold_start')} "
+                        f"({d.get('training_matches')} training matches): {d.get('error')}"
+                    )
 
     if sweep:
         lines += ["", "Half-life / shrinkage sweep (mean RPS 1X2; lower is better):"]
