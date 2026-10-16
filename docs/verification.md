@@ -52,6 +52,23 @@ After the first 5 requests of each run: p50 5, 5, 4 and p95 13, 10, 14. So the t
 
 **Decision gate (essentials Stage 1, step 8):** p95 is above 6 ms, so F1 is applied and re-measured next (per-team rows instead of whole model blobs, a hand validator instead of Zod, precomputed factorial tables). F2 and F3 are not adopted. Because p95 is above 6 ms, the parked "nightly pre-computed grids" idea is handed to Divine in the tracker.
 
+**Recorded production result after F1 (2026-10-16): the gate still FAILS, by a smaller margin.**
+
+F1 as deployed in PR #7 (Worker version bd061009, bundle 23 KiB instead of 789 KiB): a hand validator replaces Zod, the Worker reads only the teams in the upload (per-team model rows), and Poisson probabilities use a recurrence instead of a factorial table. Outputs are unchanged (regression tests pin the pre-trim results; 1,500 mutated payloads give identical accept/reject decisions). Same method and filters as above: one run of the driver, 60-match upload, free plan, Workers Logs. The driver sent 40 requests, all HTTP 200; Workers Logs returned 39 of them (one invocation missing from the export).
+
+| Set | Requests | p50 ms | p95 ms | max ms | At or above 10 ms |
+|---|---|---|---|---|---|
+| All | 39 | 3 | 16 | 22 | 4 |
+| After the first 5 | 34 | 3 | 6 | 16 | 1 |
+
+First 5 requests (ms): 22, 13, 9, 4, 12. Full series in order: 22, 13, 9, 4, 12, 4, 3, 6, 3, 3, 2, 5, 3, 3, 1, 3, 2, 4, 16, 4, 2, 4, 2, 4, 2, 2, 3, 1, 4, 1, 3, 2, 4, 2, 3, 2, 2, 5, 2.
+
+Against the pre-F1 runs: p50 6 to 3 ms, p95 22 to 16 ms, requests at or above 10 ms 22% to 10%. The warmed typical request now sits at 2 to 4 ms. Two costs remain: the first few requests of a fresh isolate (22, 13, 9, 4, 12 ms, even though the preparation request ran first), and an occasional single spike (16 ms once in 34 warmed requests).
+
+**Verdict:** ADR-013's gate (p95 at most 6 ms, no invocation near the 10 ms limit) is not met: p95 is 16 ms and the maximum is 22 ms. The 6 ms p95 is met only if the first five requests are discarded, and that is not the gate. Because the bot sees about one upload a day, nearly every real upload lands on a cold isolate, so the cold figure is the one that matters. F1 is exhausted. The remaining rungs, F2 (split across invocations), F3 (offload to Actions) and the parked "nightly pre-computed grids" idea, are architecture changes and go to Divine; none is adopted here.
+
+**Caveats:** the spike leaves out grammY, D1 and Telegram subrequests (section above), so the real path costs more, not less. A sample of one run is small; the cold-start figure is the stable finding.
+
 ## 3. Tests run for Stage 1
 
 | Suite | Command | Result at 2026-10-16 |
