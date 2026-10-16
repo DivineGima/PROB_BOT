@@ -1,30 +1,36 @@
 import { bpGrid, dcGrid, type Grid, markets, mixGrids, piGrid } from "./grids";
-import { buildSyntheticBlobs, type SpikeBlobs } from "./payload";
-import { type SpikeMatch, spikeUploadSchema } from "./schema";
+import {
+  buildSyntheticModelRows,
+  MODEL_KINDS,
+  type ModelKind,
+  type SpikeModelRows,
+} from "./payload";
+import type { SpikeMatch } from "./schema";
+import { validateUpload } from "./validate";
 
 /**
- * Stage 1 CPU spike workload (ADR-013, section 8.10): the real-shaped steps of one upload.
- *   JSON parse -> schema validation (placeholder) -> parse 3 model blobs -> per match: 3 grids of
- *   169 cells (bivariate-Poisson sums included) -> linear pool -> markets -> render + split.
- * The request body is the upload (as the Telegram download would be). The three model blobs are JSON
- * strings built once at module load, standing in for `model_params.payload_json` rows read from D1,
- * so each request pays only for parsing them. The workload excludes grammY glue and D1 round trips,
- * so Stage 5 and Stage 7 re-measure the real path.
+ * Stage 1 CPU spike workload (ADR-013, section 8.10), with the F1 trims applied:
+ *   JSON parse -> hand validation -> read ONLY the involved teams' rows for the 3 models -> per match:
+ *   3 grids of 169 cells (bivariate-Poisson sums included) -> linear pool -> markets -> render + split.
+ * The request body is the upload (as the Telegram download would be). The model rows are JSON strings
+ * built once per isolate on the `x-spike-prime` request, standing in for `model_params` rows read from D1,
+ * so each request pays only for parsing the rows it needs. The workload excludes grammY glue and D1 round
+ * trips, so Stage 5 and Stage 7 re-measure the real path.
  */
-let cachedBlobs: SpikeBlobs | undefined;
+let cachedModels: SpikeModelRows | undefined;
 
 /**
- * Builds the synthetic blobs on first use. Doing it on demand (and not when the module loads) keeps the
- * harness's own generation cost out of the first measured request: the driver calls `primeBlobs` first
- * through the `x-spike-prime` header, as real model rows would already be in D1 and cost nothing to build.
+ * Builds the synthetic model rows on first use. Doing it on demand (and not when the module loads) keeps
+ * the harness's own generation cost out of the first measured request: the driver calls `primeModels`
+ * first through the `x-spike-prime` header, as real model rows would already be in D1.
  */
-export function primeBlobs(): void {
-  cachedBlobs ??= buildSyntheticBlobs();
+export function primeModels(): void {
+  cachedModels ??= buildSyntheticModelRows();
 }
 
-function defaultBlobs(): SpikeBlobs {
-  primeBlobs();
-  return cachedBlobs as SpikeBlobs;
+function defaultModels(): SpikeModelRows {
+  primeModels();
+  return cachedModels as SpikeModelRows;
 }
 export const SPIKE_WEIGHTS = [0.4, 0.3, 0.3];
 const MAX_MESSAGE_CHARS = 3900;
@@ -34,12 +40,16 @@ interface TeamParams {
   defence: number;
 }
 
-interface ModelBlob {
+interface ModelMeta {
   home_advantage: number;
   rho: number;
   lambda3: number;
   league_total_goals: number;
-  teams: Record<string, TeamParams>;
+}
+
+interface LoadedModel {
+  meta: ModelMeta;
+  teams: Map<string, TeamParams>;
 }
 
 export interface WorkloadResult {
@@ -52,18 +62,24 @@ export interface WorkloadResult {
 
 export class SpikeInputError extends Error {}
 
-function parseBlob(text: string): ModelBlob {
-  const blob = JSON.parse(text) as ModelBlob;
-  if (typeof blob.teams !== "object" || blob.teams === null) {
-    throw new SpikeInputError("model blob has no teams");
+/** Reads the model's meta string and only the rows of the teams that appear in this upload. */
+function loadModel(models: SpikeModelRows, kind: ModelKind, teams: Set<string>): LoadedModel {
+  const metaText = models.meta[kind];
+  if (typeof metaText !== "string") throw new SpikeInputError(`model ${kind} has no meta`);
+  const meta = JSON.parse(metaText) as ModelMeta;
+  const rows = models.rows[kind];
+  const loaded = new Map<string, TeamParams>();
+  for (const team of teams) {
+    const text = rows?.[team];
+    if (typeof text !== "string")
+      throw new SpikeInputError(`unknown team in spike payload: ${team}`);
+    loaded.set(team, JSON.parse(text) as TeamParams);
   }
-  return blob;
+  return { meta, teams: loaded };
 }
 
-function lookup(blob: ModelBlob, team: string): TeamParams {
-  const params = blob.teams[team];
-  if (!params) throw new SpikeInputError(`unknown team in spike payload: ${team}`);
-  return params;
+function lookup(model: LoadedModel, team: string): TeamParams {
+  return model.teams.get(team) as TeamParams;
 }
 
 function pct(value: number): string {
@@ -108,7 +124,7 @@ function split(blocks: string[]): string[] {
 
 export function runWorkload(
   uploadText: string,
-  blobs: SpikeBlobs = defaultBlobs(),
+  models: SpikeModelRows = defaultModels(),
 ): WorkloadResult {
   let body: unknown;
   try {
@@ -116,38 +132,45 @@ export function runWorkload(
   } catch {
     throw new SpikeInputError("body is not JSON");
   }
-  const upload = spikeUploadSchema.safeParse(body);
-  if (!upload.success) throw new SpikeInputError("upload schema invalid");
+  const upload = validateUpload(body);
+  if (!upload) throw new SpikeInputError("upload schema invalid");
 
-  const dc = parseBlob(blobs.dc);
-  const pi = parseBlob(blobs.pi);
-  const bp = parseBlob(blobs.bp);
+  const involved = new Set<string>();
+  for (const match of upload.matches) {
+    involved.add(match.home);
+    involved.add(match.away);
+  }
+  const [dc, pi, bp] = MODEL_KINDS.map((kind) => loadModel(models, kind, involved)) as [
+    LoadedModel,
+    LoadedModel,
+    LoadedModel,
+  ];
 
   const blocks: string[] = [];
   let checksum = 0;
-  for (const match of upload.data.matches) {
+  for (const match of upload.matches) {
     const dcHome = lookup(dc, match.home);
     const dcAway = lookup(dc, match.away);
-    const lambdaHome = Math.exp(dc.home_advantage + dcHome.attack - dcAway.defence) * 1.3;
+    const lambdaHome = Math.exp(dc.meta.home_advantage + dcHome.attack - dcAway.defence) * 1.3;
     const lambdaAway = Math.exp(dcAway.attack - dcHome.defence) * 1.1;
 
     const piHome = lookup(pi, match.home);
     const piAway = lookup(pi, match.away);
-    const diff = piHome.attack - piAway.attack + pi.home_advantage;
-    const total = pi.league_total_goals;
+    const diff = piHome.attack - piAway.attack + pi.meta.home_advantage;
+    const total = pi.meta.league_total_goals;
     const piLambdaHome = Math.max(0.05, (total + diff) / 2);
     const piLambdaAway = Math.max(0.05, (total - diff) / 2);
 
     const bpHome = lookup(bp, match.home);
     const bpAway = lookup(bp, match.away);
-    const bpLambda1 = Math.exp(bpHome.attack - bpAway.defence + bp.home_advantage) * 1.2;
+    const bpLambda1 = Math.exp(bpHome.attack - bpAway.defence + bp.meta.home_advantage) * 1.2;
     const bpLambda2 = Math.exp(bpAway.attack - bpHome.defence) * 1.0;
 
     const pooled = mixGrids(
       [
-        dcGrid(lambdaHome, lambdaAway, dc.rho),
+        dcGrid(lambdaHome, lambdaAway, dc.meta.rho),
         piGrid(piLambdaHome, piLambdaAway),
-        bpGrid(bpLambda1, bpLambda2, bp.lambda3),
+        bpGrid(bpLambda1, bpLambda2, bp.meta.lambda3),
       ],
       SPIKE_WEIGHTS,
     );
@@ -158,7 +181,7 @@ export function runWorkload(
 
   const messages = split(blocks);
   return {
-    matches: upload.data.matches.length,
+    matches: upload.matches.length,
     messages: messages.length,
     characters: messages.reduce((sum, m) => sum + m.length, 0),
     checksum,

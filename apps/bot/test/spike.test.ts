@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { handleFetch } from "../src/index";
 import { bpGrid, CELLS, dcGrid, GRID_SIZE, markets, mixGrids, piGrid } from "../src/spike/grids";
-import { buildSyntheticBlobs, buildSyntheticUpload } from "../src/spike/payload";
+import { buildSyntheticModelRows, buildSyntheticUpload, MODEL_KINDS } from "../src/spike/payload";
 import { runWorkload, SpikeInputError } from "../src/spike/workload";
 
 const sum = (grid: Float64Array) => grid.reduce((a, b) => a + b, 0);
@@ -102,17 +102,23 @@ describe("synthetic payloads", () => {
   it("are deterministic for a seed and differ across seeds", () => {
     expect(upload(60)).toBe(upload(60));
     expect(upload(60, 7)).not.toBe(upload(60));
-    expect(buildSyntheticBlobs(1).dc).toBe(buildSyntheticBlobs(1).dc);
-    expect(buildSyntheticBlobs(1).dc).not.toBe(buildSyntheticBlobs(2).dc);
+    const row = (seed: number) => buildSyntheticModelRows(seed).rows.dc["Synthetic Club 000"];
+    expect(row(1)).toBe(row(1));
+    expect(row(1)).not.toBe(row(2));
   });
 
-  it("have a 60-match upload near 1 KB per match and blobs of 30-60 KB (sections 3.2, 5.4)", () => {
+  it("have a 60-match upload near 1 KB per match and model rows totalling 30-60 KB per model (sections 3.2, 5.4)", () => {
     const bytes = upload(60).length;
     expect(bytes).toBeGreaterThan(40_000);
     expect(bytes).toBeLessThan(90_000);
-    for (const blob of Object.values(buildSyntheticBlobs())) {
-      expect(blob.length).toBeGreaterThan(25_000);
-      expect(blob.length).toBeLessThan(90_000);
+    const models = buildSyntheticModelRows();
+    for (const kind of MODEL_KINDS) {
+      const rows = Object.values(models.rows[kind]);
+      expect(rows).toHaveLength(240);
+      const total = rows.reduce((sum, r) => sum + r.length, 0);
+      expect(total).toBeGreaterThan(25_000);
+      expect(total).toBeLessThan(90_000);
+      expect(models.meta[kind].length).toBeLessThan(300);
     }
   });
 });
@@ -129,6 +135,47 @@ describe("runWorkload", () => {
 
   it("is deterministic", () => {
     expect(runWorkload(upload(20))).toEqual(runWorkload(upload(20)));
+  });
+
+  // Reference values from the version BEFORE the F1 trims (whole-blob parsing, Zod, log-factorial
+  // tables). The trims must change the cost, not the numbers.
+  it.each([
+    [3, 1, 518, 1.2838745452319058],
+    [60, 3, 10549, 28.10922765363446],
+    [100, 5, 17608, 47.11782434466526],
+  ])(
+    "gives the same output as before the F1 trims for %i matches",
+    (n, messages, characters, checksum) => {
+      const result = runWorkload(upload(n));
+      expect(result.matches).toBe(n);
+      expect(result.messages).toBe(messages);
+      expect(result.characters).toBe(characters);
+      expect(result.checksum).toBeCloseTo(checksum, 9);
+    },
+  );
+
+  it("reads only the rows of the teams in the upload, not the whole model", () => {
+    const models = buildSyntheticModelRows();
+    const touched = new Set<string>();
+    const watched = {
+      meta: models.meta,
+      rows: Object.fromEntries(
+        MODEL_KINDS.map((kind) => [
+          kind,
+          new Proxy(models.rows[kind], {
+            get(target, prop) {
+              if (typeof prop === "string" && prop.startsWith("Synthetic Club")) touched.add(prop);
+              return Reflect.get(target, prop);
+            },
+          }),
+        ]),
+      ),
+    } as typeof models;
+    const small = buildSyntheticUpload(3) as { matches: { home: string; away: string }[] };
+    runWorkload(JSON.stringify(small), watched);
+    const expected = new Set(small.matches.flatMap((m) => [m.home, m.away]));
+    expect(touched).toEqual(expected);
+    expect(touched.size).toBeLessThanOrEqual(6);
   });
 
   it("handles an empty match list and the 100-match cap", () => {
@@ -152,9 +199,16 @@ describe("runWorkload", () => {
     expect(() => runWorkload(JSON.stringify(unknown))).toThrow(SpikeInputError);
   });
 
-  it("rejects a model blob without teams", () => {
-    const blobs = { ...buildSyntheticBlobs(), dc: "{}" };
-    expect(() => runWorkload(upload(3), blobs)).toThrow(/no teams/);
+  it("rejects a model with a missing team row or missing meta", () => {
+    const models = buildSyntheticModelRows();
+    const first = (buildSyntheticUpload(3) as { matches: { home: string }[] }).matches[0];
+    if (!first) throw new Error("fixture has no matches");
+    delete models.rows.dc[first.home];
+    expect(() => runWorkload(upload(3), models)).toThrow(/unknown team/);
+
+    const noMeta = buildSyntheticModelRows();
+    (noMeta.meta as Record<string, unknown>).pi = undefined;
+    expect(() => runWorkload(upload(3), noMeta)).toThrow(/no meta/);
   });
 });
 

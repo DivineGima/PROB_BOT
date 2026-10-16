@@ -2,10 +2,17 @@
  * Deterministic synthetic payloads for the CPU spike. Pure, erasable-syntax TypeScript so Node
  * can import it directly from `scripts/cpu-spike.mjs` and Vitest can import it in tests.
  */
-export interface SpikeBlobs {
-  dc: string;
-  pi: string;
-  bp: string;
+export type ModelKind = "dc" | "pi" | "bp";
+export const MODEL_KINDS: readonly ModelKind[] = ["dc", "pi", "bp"];
+
+/**
+ * Model parameters as they would sit in D1 after the F1 trim: one small JSON "meta" string per model
+ * (league-wide numbers) and one JSON string per team per model. The Worker reads and parses only the
+ * rows of the teams in the upload, not the whole model.
+ */
+export interface SpikeModelRows {
+  meta: Record<ModelKind, string>;
+  rows: Record<ModelKind, Record<string, string>>;
 }
 
 /** mulberry32: small deterministic PRNG so every run measures the same bytes. */
@@ -30,31 +37,16 @@ export function teamName(index: number): string {
 
 const round = (value: number, digits: number): number => Number(value.toFixed(digits));
 
-/**
- * One model blob per model, as a JSON string exactly like `model_params.payload_json` (about
- * 30-60 KB each, section 5.4). Per-team arrays pad the size toward the documented range.
- */
-function buildBlob(rng: () => number, kind: "dc" | "pi" | "bp"): string {
-  const teams: Record<string, unknown> = {};
-  for (let t = 0; t < TEAM_COUNT; t++) {
-    const entry: Record<string, unknown> = {
-      attack: round(rng() * 0.8 - 0.4, 6),
-      defence: round(rng() * 0.8 - 0.4, 6),
-      n: 20 + Math.floor(rng() * 100),
-      history: Array.from({ length: 12 }, () => round(rng() * 2 - 1, 6)),
-    };
-    if (kind === "pi") entry.away_rating = round(rng() * 1.2 - 0.6, 6);
-    teams[teamName(t)] = entry;
-  }
-  return JSON.stringify({
-    version: 1,
-    model: kind,
-    home_advantage: 0.25,
-    rho: -0.05,
-    lambda3: 0.1,
-    league_total_goals: 2.7,
-    teams,
-  });
+/** One team's parameters for one model. The history array pads the row to the documented size. */
+function buildTeamRow(rng: () => number, kind: ModelKind): string {
+  const entry: Record<string, unknown> = {
+    attack: round(rng() * 0.8 - 0.4, 6),
+    defence: round(rng() * 0.8 - 0.4, 6),
+    n: 20 + Math.floor(rng() * 100),
+    history: Array.from({ length: 12 }, () => round(rng() * 2 - 1, 6)),
+  };
+  if (kind === "pi") entry.away_rating = round(rng() * 1.2 - 0.6, 6);
+  return JSON.stringify(entry);
 }
 
 /** A schema-v1-shaped upload of `matchCount` matches (about 1 KB per match, section 3.2). */
@@ -103,8 +95,23 @@ export function buildSyntheticUpload(matchCount = 60, seed = 20261016): unknown 
   };
 }
 
-/** The three model blobs as JSON strings, like rows read from `model_params.payload_json`. */
-export function buildSyntheticBlobs(seed = 4242): SpikeBlobs {
+/** All three models as per-team rows plus a small meta string each (section 5.4 sizes, 240 teams). */
+export function buildSyntheticModelRows(seed = 4242): SpikeModelRows {
   const rng = makeRng(seed);
-  return { dc: buildBlob(rng, "dc"), pi: buildBlob(rng, "pi"), bp: buildBlob(rng, "bp") };
+  const meta = {} as Record<ModelKind, string>;
+  const rows = {} as Record<ModelKind, Record<string, string>>;
+  for (const kind of MODEL_KINDS) {
+    meta[kind] = JSON.stringify({
+      version: 1,
+      model: kind,
+      home_advantage: 0.25,
+      rho: -0.05,
+      lambda3: 0.1,
+      league_total_goals: 2.7,
+    });
+    const perTeam: Record<string, string> = {};
+    for (let t = 0; t < TEAM_COUNT; t++) perTeam[teamName(t)] = buildTeamRow(rng, kind);
+    rows[kind] = perTeam;
+  }
+  return { meta, rows };
 }
