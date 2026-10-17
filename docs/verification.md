@@ -165,7 +165,7 @@ First real `fit` (run 38981127749) and `publish` (run 38981213952): all three mo
 
 | # | Check | Target | Result |
 |---|---|---|---|
-| 1 | Worker CPU p95, uploads of 15, 60 and 100 matches (Workers Logs `cpuTime`) | at most 6 ms, nothing near 10 ms | **Missed (2026-10-18).** Warmed uploads of 15 and 49 matches cost 7 to 9 ms (p50 8); the first request after a quiet period cost 11 to 25 ms. 60 and 100 matches not measured (only 49 forecasts exist). Detail below |
+| 1 | Worker CPU p95, uploads of 15, 60 and 100 matches (Workers Logs `cpuTime`) | at most 6 ms, nothing near 10 ms | **Missed, accepted by Divine (2026-10-18).** Before the trim: warmed 7 to 9 ms (p50 8), first request after a quiet period 11 to 25 ms. After the F1 trim (hand validator, ADR-047): warmed 5 to 8 ms (p50 7, 11 samples), first request 14 to 17 ms; 2 of 13 requests at or above 10 ms, both cold. 60 and 100 matches not measured (only 49 forecasts exist). Detail below |
 | 2 | Upload to first reply, p95 (NFR-11) | at most 30 s | **Met.** 0.9 to 1.6 s handler time (wall 1.1 to 1.9 s) over 10 processed uploads |
 | 3 | `INSERT ... json_each` works on the live D1 | first upload creates predictions | **Met.** 16 predictions logged from 3 files; every re-upload reported all of them as already logged (`n_duplicate` equal to `n_published`) |
 | 4 | Forecast rows per night and per run | about 75 to 400 rows | **49** rows for the first live run (30 `ok`, 11 `DRIFT`, 8 `INSUFFICIENT_HISTORY`); below the range because ingest holds only the next 4 days of one weekend's fixtures. One run only |
@@ -192,3 +192,15 @@ If check 1 misses, the next steps are the F1 trims of the remaining parse and va
 - Not measured: 60 and 100 matches (only 49 fixtures have forecasts), and a sample large enough for a real p95 (the production load is about one upload a day, so most requests are cold).
 - What the bot answered (checked by eye by Divine): five probability blocks with 1X2 and over lines summing correctly, two omissions with the right reasons and numbers (`DRIFT` home goals conceded 0.67 against 0.6; `INSUFFICIENT_HISTORY` 8 matches), footer with the live run id.
 - **Test data in the live log:** the 16 logged predictions came from test files built by Claude Code from the stored fixtures, not from a screener run. They are real model forecasts of real fixtures and will be scored when played, so they enter the weekly report's sample. Divine decides whether to keep them (see the tracker).
+
+**After the F1 trim (version `2a068cd6`, PR 23; 2026-10-18 23:20 to 23:36 UTC).** Same method, same two files, 13 requests, all processed, all matches reported as already logged.
+
+| Set | Sends | CPU ms | Handler ms |
+|---|---|---|---|
+| 15 matches, burst 1 | 4 | 17, 7, 6, 5 | 1021, 925, 888, 880 |
+| 15 matches, burst 2 | 5 | 14, 8, 8, 6, 6 | 1074, 1060, 911, 1063, 943 |
+| 49 matches | 4 | 8, 8, 7, 7 | 1069, 995, 1051, 1035 |
+
+- Warmed (11 samples): 5 to 8 ms, p50 7, max 8; 4 of 11 at 6 ms or under. First request of each burst: 17 and 14 ms. Handler time 0.9 to 1.1 s (target 30 s).
+- The trim gained about 1 ms on warmed requests (median 8 to 7) and 3 to 8 ms on the first request; the cold start itself is not something the validator affects. The 15- and 49-match files still cost the same, so the remaining cost is fixed (Telegram calls, D1 calls, the file hash, start-up).
+- **Decision (Divine, 2026-10-18): accept the miss and go to Stage 7.** No request failed at any time, including seven at or above 10 ms. What a strict enforcement would look like: a silent upload that is sent again; nothing is lost or wrong (the insert is all-or-nothing and a repeat is reported as already logged). Stage 7's watchdog is the safety net; the paid Workers plan stays the fallback if silent uploads ever happen.

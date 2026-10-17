@@ -27,6 +27,7 @@ Derived from `PRD_2.md`. Resolves ADR-037, which version 1 recorded as a directi
 | ADR-045 | `predictions` rows are self-contained (forecast values, weights, drift and baseline copied in) and `predictions.run_id` is a plain column, not a foreign key, so old runs can be pruned. | §5.5 |
 | ADR-046 | Rolling per-model RPS from logged predictions feeds the next fit; weekly report, calibration snapshots and a backtest regression check (informational) are specified. | §6.7, §8.3, §8.7, §9.3 |
 | ADR-047 | The Worker validates the screener file with a hand-written validator; the Zod schema stays the contract source and a differential test keeps the two equal. | §6.1, §6.5, §8.10 |
+| ADR-048 | The Worker CPU target (p95 6 ms) is missed after the F1 trim and accepted by Divine; the Stage 7 watchdog is the safety net. | §8.10, R-P1 |
 | New omission code | `NO_FORECAST`: the fixture has no stored forecast. The Worker never computes a number itself. | §5.5, §6.3 |
 | New table | `fixture_forecasts` (migration 0004). `predictions` and `omissions` (0005) and `calibration_snapshots` (0006) keep their ADR-033 stage ownership. | §5 |
 | Gate | The promotion gate also requires the run's forecast rows to be present (§8.6). | §8.6 |
@@ -1230,6 +1231,8 @@ Gate: if p95 over 20 production-like uploads exceeds **6 ms** (or any invocation
 
 **[v2] F1 applied to the screener validation (ADR-047, 2026-10-18).** The first production measurement (verification section 7) gave 7 to 9 ms of CPU per warmed upload and 11 to 25 ms for the first request after a quiet period, against the 6 ms target, and the cost did not grow with the number of matches: it is fixed work. The runtime validation moved from Zod to a hand-written validator (`intake/validate.ts`), which also removes Zod from the Worker bundle. `intake/schema.ts` stays the single source of the contract (generated JSON Schema, drift test), and `test/intake-validate.test.ts` requires the same verdict, the same issue paths and codes, and the same parsed data as the Zod schema on thousands of mutated files. Re-measurement follows the merge (verification section 7).
 
+**[v2] Outcome (ADR-048, 2026-10-18).** After the trim the warmed cost is 5 to 8 ms (p50 7) and the first request after a quiet period 14 to 17 ms, so the 6 ms target is not met. Divine accepted the miss and chose to proceed. F2, F3 and the paid plan stay unadopted; the paid plan is the fallback if uploads are ever cut off in production.
+
 ---
 
 ### 8.11 [v2] Nightly forecasts (ADR-042)
@@ -1502,6 +1505,7 @@ Status values: Accepted (locked), Accepted-hypothesis (locked but validated by b
 | 045 | [v2] `predictions` are self-contained; `predictions.run_id` has no foreign key | Pruning runs older than 30 (ADR-004) would otherwise fail on predictions that reference them, and predictions must outlive their run | Keep every run; cascade-delete predictions | Baseline and forecast values are copied into each prediction; `run_id` is for display and audit |
 | 046 | [v2] Rolling per-model RPS from logged predictions feeds the next fit's ensemble weights; weekly report with paired bootstrap interval; `calibration_snapshots`; backtest regression check against the previous comparable stored backtest (tolerance 0.003 RPS) | Stage 6 of the build plan; ADR-020 asks for rolling weights | Compare with a committed metrics file (needs a commit to update) | Alignment rule: a prediction enters a model's history only if every fitted model forecast it; tolerance is a starting value, unvalidated |
 | 047 | [v2] The Worker validates the screener file with a hand-written validator (`intake/validate.ts`) instead of running Zod at request time; `intake/schema.ts` (Zod) remains the contract and generates the JSON Schema | Stage 5b CPU gate missed on the first production run (7 to 9 ms warmed, 11 to 25 ms cold, target 6); F1 trim of the validation work is the next step of the ladder (§8.10) and the cost is fixed per request | Workers Paid plan; F2/F3 (not adopted); accept the miss | Differential test (thousands of mutated files: same verdict, issue paths and codes, parsed data); Zod is no longer in the Worker bundle |
+| 048 | [v2] Divine accepted the missed CPU target on 2026-10-18 and chose to proceed to Stage 7 | After the F1 trim: warmed 5 to 8 ms (target 6), first request 14 to 17 ms (Free-plan limit 10); no request failed in 26 production requests; the remaining cost is fixed (Telegram, D1, hash, start-up) | Workers Paid plan (new architecture version); more trims (about 1 ms, uncertain) | Silent upload at worst, resent by Divine; nothing lost or wrong; watchdog alert for an upload stuck in `received` (Stage 7). Revisit with the paid plan if it ever happens |
 
 **Amendments decided by Divine on 2026-10-16 [Rev-2]:** A-1 decided (ADR-035: hand-downloaded co.uk files if the Stage 1 check allows it, otherwise football-data.org only and the Scottish Premiership dropped); A-2 accepted (two Cloudflare tokens, ADR-018); A-3 accepted (cron `17 1 * * *`, ADR-036); A-4 accepted (reply p95 ≤ 30 s, NFR-11, ADR-036). **[Rev-3] A-1 resolved on 2026-10-16/17: path 2 (football-data.org only, Scottish Premiership dropped).** Only open item: whether the Stage 1 terms check allows hand downloading, which selects path 1 or path 2 of A-1.
 
@@ -1517,7 +1521,7 @@ S1–S14 as in the threat table. Additional residual risk: **R-S3** — branch p
 
 | ID | Risk | Likelihood / impact | Mitigation |
 |---|---|---|---|
-| R-P1 | Worker exceeds 10 ms CPU on a large upload | Low / High (no reply) [v2: no model arithmetic in the Worker] | CPU gate re-measured in Essentials 2 Stages 5b and 7; hard cap 100 matches; F1 trims of parsing, then escalate |
+| R-P1 | Worker exceeds 10 ms CPU on a large upload | Medium / Low (a silent upload, resent; nothing lost or wrong) [v2: no model arithmetic in the Worker; measured 2026-10-18: warmed 5 to 8 ms, first request 14 to 17 ms, no failure] | Accepted (ADR-048); cost does not grow with the file; hard cap 100 matches; Stage 7 watchdog alerts on an upload stuck in `received`; paid plan as fallback |
 | R-P2 | Subrequest limit (50) exceeded by many reply messages | Low / Medium | Chunking at block boundaries; worst case 29 (§3.4); count in tests |
 | R-P3 | D1 statements per invocation (50) exceeded | Low / Medium | Batched repo calls; test counting statements |
 | R-P4 | D1 REST latency or rate limits slow the nightly job | Medium / Low | Chunked upserts, resumable steps, timeout 45 min |
