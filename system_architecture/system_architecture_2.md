@@ -26,6 +26,7 @@ Derived from `PRD_2.md`. Resolves ADR-037, which version 1 recorded as a directi
 | ADR-044 | History and drift verdicts are computed in Python at forecast time (`footy/drift.py`), one implementation. | §8.4 |
 | ADR-045 | `predictions` rows are self-contained (forecast values, weights, drift and baseline copied in) and `predictions.run_id` is a plain column, not a foreign key, so old runs can be pruned. | §5.5 |
 | ADR-046 | Rolling per-model RPS from logged predictions feeds the next fit; weekly report, calibration snapshots and a backtest regression check (informational) are specified. | §6.7, §8.3, §8.7, §9.3 |
+| ADR-047 | The Worker validates the screener file with a hand-written validator; the Zod schema stays the contract source and a differential test keeps the two equal. | §6.1, §6.5, §8.10 |
 | New omission code | `NO_FORECAST`: the fixture has no stored forecast. The Worker never computes a number itself. | §5.5, §6.3 |
 | New table | `fixture_forecasts` (migration 0004). `predictions` and `omissions` (0005) and `calibration_snapshots` (0006) keep their ADR-033 stage ownership. | §5 |
 | Gate | The promotion gate also requires the run's forecast rows to be present (§8.6). | §8.6 |
@@ -655,7 +656,7 @@ Interfaces are the *only* way modules talk; signatures are contracts reviewed in
 | Module | Interface | Notes |
 |---|---|---|
 | `auth` | `verifyWebhook(req): Result<Ok, AuthError>`; `checkSession(update): Session \| null` | **The only module that reads webhook secret, chat id or user id.** Locked-block requirement |
-| `intake` | `parseScreenerFile(bytes): Result<ScreenerV1, IntakeError>` | Size cap, UTF-8, JSON parse, Zod |
+| `intake` | `parseScreenerFile(bytes): Result<ScreenerV1, IntakeError>` | Size cap, UTF-8, JSON parse, hand validator (`intake/validate.ts`) kept equal to the Zod contract in `intake/schema.ts` by a differential test (ADR-047) |
 | `repo` | `RunRepository`, `PredictionRepository`, `UpdateRepository`, `TeamRepository` (see below) | **The only module that touches D1.** Batched calls |
 | `engine` | [v2] **Not built.** Version 1 listed `buildGrid`, `mixGrids`, `markets`; the grids are computed in Python (ADR-042). The spike code under `apps/bot/src/spike` stays, deprecated | |
 | `drift` | [v2] **Not built in the Worker.** The verdict is computed by `footy/drift.py` and stored with the forecast (ADR-044) | |
@@ -675,7 +676,7 @@ Interfaces are the *only* way modules talk; signatures are contracts reviewed in
 | `E_DOWNLOAD_FAILED` | `getFile`/download failed | yes | 200 |
 | `E_PARSE` | Not valid UTF-8 JSON | yes | 200 |
 | `E_SCHEMA_VERSION` | `schema_version` ≠ 1 | yes | 200 |
-| `E_SCHEMA_INVALID` | Zod validation failure | yes (≤ 5 paths) | 200 |
+| `E_SCHEMA_INVALID` | Schema validation failure | yes (≤ 5 paths) | 200 |
 | `E_NO_RUN` | No usable active run | yes | 200 |
 | `E_INTERNAL` | Unexpected exception | yes: "Internal error, id=…" | 200 |
 | `E_AUTH` | Bad secret header | no | 401 |
@@ -790,7 +791,7 @@ C4Component
     Container_Boundary(worker, "Bot Worker (TypeScript)") {
         Component(entry, "Entry", "fetch and scheduled handlers", "Routes POST /tg/secret, cron to watchdog, everything else 404")
         Component(auth, "auth", "module", "verifyWebhook, checkSession. Only module that reads secrets and allowlist")
-        Component(intake, "intake", "Zod schema v1", "Size cap, UTF-8, JSON parse, schema validation, business checks")
+        Component(intake, "intake", "hand validator, Zod contract v1", "Size cap, UTF-8, JSON parse, schema validation, business checks")
         Component(dedupe, "update dedupe", "via repo", "Insert update_id once; ignore replays")
         Component(lookup, "forecast lookup", "via repo", "One batched read of the stored forecasts for the upload date; NO_FORECAST when absent")
         Component(upload, "upload pipeline", "orchestration", "Intake, team resolution, business checks, forecast lookup, immutable insert, then reply")
@@ -1227,6 +1228,8 @@ Gate: if p95 over 20 production-like uploads exceeds **6 ms** (or any invocation
 
 **[v2] Resolution (ADR-042).** The pre-computed-grids direction is now a design: §8.11. F2, F3 and the Workers Paid plan remain unadopted. The Stage 5b gate (essentials 2) measures p95 on production-like uploads of 15, 60 and 100 matches against the 6 ms target; if it is still missed, the next steps are F1 trims of the remaining parse and validation work (hand validator instead of Zod), then escalation to Divine.
 
+**[v2] F1 applied to the screener validation (ADR-047, 2026-10-18).** The first production measurement (verification section 7) gave 7 to 9 ms of CPU per warmed upload and 11 to 25 ms for the first request after a quiet period, against the 6 ms target, and the cost did not grow with the number of matches: it is fixed work. The runtime validation moved from Zod to a hand-written validator (`intake/validate.ts`), which also removes Zod from the Worker bundle. `intake/schema.ts` stays the single source of the contract (generated JSON Schema, drift test), and `test/intake-validate.test.ts` requires the same verdict, the same issue paths and codes, and the same parsed data as the Zod schema on thousands of mutated files. Re-measurement follows the merge (verification section 7).
+
 ---
 
 ### 8.11 [v2] Nightly forecasts (ADR-042)
@@ -1498,6 +1501,7 @@ Status values: Accepted (locked), Accepted-hypothesis (locked but validated by b
 | 044 | [v2] History and drift verdicts are computed once, in Python, at forecast time and stored | A TypeScript copy would need its own parity tests and CPU | A TypeScript `drift` module | Thresholds stay in `config_json`; verdict and statistics are visible in the reply |
 | 045 | [v2] `predictions` are self-contained; `predictions.run_id` has no foreign key | Pruning runs older than 30 (ADR-004) would otherwise fail on predictions that reference them, and predictions must outlive their run | Keep every run; cascade-delete predictions | Baseline and forecast values are copied into each prediction; `run_id` is for display and audit |
 | 046 | [v2] Rolling per-model RPS from logged predictions feeds the next fit's ensemble weights; weekly report with paired bootstrap interval; `calibration_snapshots`; backtest regression check against the previous comparable stored backtest (tolerance 0.003 RPS) | Stage 6 of the build plan; ADR-020 asks for rolling weights | Compare with a committed metrics file (needs a commit to update) | Alignment rule: a prediction enters a model's history only if every fitted model forecast it; tolerance is a starting value, unvalidated |
+| 047 | [v2] The Worker validates the screener file with a hand-written validator (`intake/validate.ts`) instead of running Zod at request time; `intake/schema.ts` (Zod) remains the contract and generates the JSON Schema | Stage 5b CPU gate missed on the first production run (7 to 9 ms warmed, 11 to 25 ms cold, target 6); F1 trim of the validation work is the next step of the ladder (§8.10) and the cost is fixed per request | Workers Paid plan; F2/F3 (not adopted); accept the miss | Differential test (thousands of mutated files: same verdict, issue paths and codes, parsed data); Zod is no longer in the Worker bundle |
 
 **Amendments decided by Divine on 2026-10-16 [Rev-2]:** A-1 decided (ADR-035: hand-downloaded co.uk files if the Stage 1 check allows it, otherwise football-data.org only and the Scottish Premiership dropped); A-2 accepted (two Cloudflare tokens, ADR-018); A-3 accepted (cron `17 1 * * *`, ADR-036); A-4 accepted (reply p95 ≤ 30 s, NFR-11, ADR-036). **[Rev-3] A-1 resolved on 2026-10-16/17: path 2 (football-data.org only, Scottish Premiership dropped).** Only open item: whether the Stage 1 terms check allows hand downloading, which selects path 1 or path 2 of A-1.
 
@@ -1703,3 +1707,4 @@ Differences between the text above and the code, found while building. None chan
 | §8.6 gate | Besides the count check, a forecast carry-over check against the active run (new subsection above); `GATE_FORECAST_CARRYOVER = 0.5` |
 | §8.7 scoring | A finished match whose score is not verified stays `pending` for 3 days after kickoff before it is voided `UNVERIFIED_RESULT` (an `AWARDED` match is still void at once) |
 | §8.7 report | The omission rate counts omitted and published per processed upload |
+| §6.5 `intake` (ADR-047) | The runtime validator is `intake/validate.ts`; `intake/schema.ts` (Zod) is used by the contract generator and the tests only, so Zod is not part of the Worker bundle |
