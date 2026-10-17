@@ -165,12 +165,30 @@ First real `fit` (run 38981127749) and `publish` (run 38981213952): all three mo
 
 | # | Check | Target | Result |
 |---|---|---|---|
-| 1 | Worker CPU p95, uploads of 15, 60 and 100 matches (Workers Logs `cpuTime`) | at most 6 ms, nothing near 10 ms | _pending_ |
-| 2 | Upload to first reply, p95 (NFR-11) | at most 30 s | _pending_ |
-| 3 | `INSERT ... json_each` works on the live D1 | first upload creates predictions | _pending_ |
-| 4 | Forecast rows per night and per run | about 75 to 400 rows | _pending_ |
+| 1 | Worker CPU p95, uploads of 15, 60 and 100 matches (Workers Logs `cpuTime`) | at most 6 ms, nothing near 10 ms | **Missed (2026-10-18).** Warmed uploads of 15 and 49 matches cost 7 to 9 ms (p50 8); the first request after a quiet period cost 11 to 25 ms. 60 and 100 matches not measured (only 49 forecasts exist). Detail below |
+| 2 | Upload to first reply, p95 (NFR-11) | at most 30 s | **Met.** 0.9 to 1.6 s handler time (wall 1.1 to 1.9 s) over 10 processed uploads |
+| 3 | `INSERT ... json_each` works on the live D1 | first upload creates predictions | **Met.** 16 predictions logged from 3 files; every re-upload reported all of them as already logged (`n_duplicate` equal to `n_published`) |
+| 4 | Forecast rows per night and per run | about 75 to 400 rows | **49** rows for the first live run (30 `ok`, 11 `DRIFT`, 8 `INSUFFICIENT_HISTORY`); below the range because ingest holds only the next 4 days of one weekend's fixtures. One run only |
 | 5 | `report --send` delivers text and chart | both arrive in the private chat | _pending_ |
 | 6 | First scored predictions after `score` | status `scored` for played matches | _pending_ |
 | 7 | `backtest.yml` first scheduled run | green or an understood red | _pending_ |
 
 If check 1 misses, the next steps are the F1 trims of the remaining parse and validation work (a hand validator instead of Zod), then escalation to Divine (architecture section 8.10).
+
+**First live run (2026-10-17 night, UTC; production, Free plan).** Run `R20261017T214541Z` promoted (`fit` run 39072264066, `publish` run 39072948642; gate passed, 49 forecast rows found and 49 expected, all payload hashes verified). The bot token had to be re-entered once: the first value was rejected by the Worker's format check and every update ended `no_telegram_client` until it was replaced (the fail-safe worked as designed: no reply, an event, no crash). Source: Workers Logs through the observability API, every request in the window.
+
+| Request | Matches in file | CPU ms | Handler ms | Note |
+|---|---|---|---|---|
+| Schema reject (`notes` too long) | n/a | 25, 7 | 619, 596 | first one after a quiet period |
+| Not a JSON file | n/a | 5 | 555 | |
+| 0 matches | 0 | 14 | 937 | first after 10 quiet minutes |
+| 7 matches | 5 published, 2 omitted | 20 | 1372 | first after 10 quiet minutes |
+| 15 matches, 1st to 4th send | 10 published, 5 omitted | 17, 8, 8, 7 | 1189, 1394, 863, 893 | first send logs 5 new predictions |
+| 49 matches, 1st to 4th send | 16 published, 33 omitted | 11, 9, 8, 7 | 1633, 1042, 1042, 1039 | |
+
+- All 13 requests: p50 8 ms, p95 about 25 ms (n = 13, so the p95 is the maximum and only indicative). Warmed requests (second to fourth send of a file, n = 6): 7 to 9 ms. At or above 10 ms: 5 of 13, all of them the first request after a quiet period; none returned an error.
+- Cost does not grow with the file: 15 and 49 matches cost the same when warm, so the 7 to 9 ms is a fixed price (parse and Zod validation, SHA-256, the Telegram download and reply, D1 calls), not per-match arithmetic. The Stage 1 spike measured 2 to 4 ms warmed because it did none of that I/O work.
+- **Verdict on check 1: the 6 ms target is not met** (warm 7 to 9 ms, cold 11 to 25 ms). The Free plan limit is 10 ms; no request failed, but the cold ones exceed it. Per the CPU gate the next step is the F1 trim of validation (hand validator instead of Zod), then escalation; F2, F3 and the paid plan stay unadopted until Divine decides (tracker, 2026-10-18).
+- Not measured: 60 and 100 matches (only 49 fixtures have forecasts), and a sample large enough for a real p95 (the production load is about one upload a day, so most requests are cold).
+- What the bot answered (checked by eye by Divine): five probability blocks with 1X2 and over lines summing correctly, two omissions with the right reasons and numbers (`DRIFT` home goals conceded 0.67 against 0.6; `INSUFFICIENT_HISTORY` 8 matches), footer with the live run id.
+- **Test data in the live log:** the 16 logged predictions came from test files built by Claude Code from the stored fixtures, not from a screener run. They are real model forecasts of real fixtures and will be scored when played, so they enter the weekly report's sample. Divine decides whether to keep them (see the tracker).
