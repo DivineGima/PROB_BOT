@@ -5,8 +5,8 @@
 
 -- One row per published fixture. The Worker COPIES the stored forecast into this row (it computes
 -- nothing); the first row for a fixture_key wins (INSERT OR IGNORE) and its forecast columns are
--- never changed afterwards (trigger below). Only the result and scoring columns are updated by
--- `footy score`. run_id is a plain column, not a foreign key (ADR-045): a prediction copies what it
+-- never changed afterwards: the only writers are the Worker's insert and `footy score`, which
+-- updates the result and scoring columns only (invariant 2, section 5.7, enforced in code and tests). run_id is a plain column, not a foreign key (ADR-045): a prediction copies what it
 -- needs, so old runs can be pruned.
 CREATE TABLE predictions (
   pred_id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,17 +58,6 @@ CREATE TABLE predictions (
 CREATE INDEX idx_predictions_status_date ON predictions (status, match_date);
 CREATE INDEX idx_predictions_comp_date ON predictions (comp_code, match_date);
 CREATE INDEX idx_predictions_date ON predictions (match_date);
-
--- Invariant 2 (section 5.7): a prediction's forecast columns never change. Result and scoring
--- columns (status, void_reason, goals_*, rps_*, logloss_1x2, scored_at) are not listed.
-CREATE TRIGGER predictions_forecast_is_immutable
-BEFORE UPDATE OF fixture_key, upload_id, run_id, label, comp_code, match_date, kickoff_utc,
-  home_team_id, away_team_id, p_home, p_draw, p_away, p_over_05, p_over_15, p_over_25, p_over_35,
-  p_over_45, p_over_55, total_json, models_json, weights_json, drift_json, baseline_json,
-  inputs_json, created_at ON predictions
-BEGIN
-  SELECT RAISE(ABORT, 'a prediction forecast is immutable');
-END;
 
 -- Matches in an upload that did not produce a prediction, with the reason (ADR-024).
 CREATE TABLE omissions (

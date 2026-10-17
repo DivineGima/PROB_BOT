@@ -19,13 +19,14 @@ beforeEach(async () => {
   ]);
 });
 
-describe("migrations 0001 to 0005", () => {
-  it("create exactly the Stage 1, 2, 4, 5a and 5b tables, no later-stage ones (ADR-033)", async () => {
+describe("migrations 0001 to 0006", () => {
+  it("create exactly the tables of Stages 1 to 6 (ADR-033)", async () => {
     const { results } = await env.DB.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name <> 'd1_migrations' ORDER BY name",
     ).all<{ name: string }>();
     expect(results.map((r) => r.name)).toEqual([
       "active_run",
+      "calibration_snapshots",
       "competitions",
       "events",
       "fixture_forecasts",

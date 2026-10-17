@@ -63,7 +63,7 @@ def fit_again(db: SqliteD1, second: int) -> str:
     return str(result.summary["run_id"])
 
 
-# -- fit ------------------------------------------------------------------------------------------
+# -- fit ----------
 
 
 def test_fit_writes_a_building_run_with_everything_the_worker_needs(fitted: SqliteD1) -> None:
@@ -207,7 +207,7 @@ def test_a_database_failure_during_fit_is_reported_not_raised(world: SyntheticWo
     assert db.rows("SELECT status FROM job_runs WHERE kind = 'fit'")[0]["status"] == "failed"
 
 
-# -- publish --------------------------------------------------------------------------------------
+# -- publish ----------
 
 
 def test_publishing_the_first_run_makes_it_active(fitted: SqliteD1) -> None:
@@ -352,7 +352,7 @@ def test_the_repo_refuses_to_promote_a_run_that_is_not_promotable(fitted: Sqlite
     assert run_ids(db, "active") == ["R20260601T011701Z"]  # the active run was not superseded
 
 
-# -- rollback and pruning -------------------------------------------------------------------------
+# -- rollback and pruning ----------
 
 
 def test_rollback_points_the_active_run_back_at_a_superseded_run(fitted: SqliteD1) -> None:

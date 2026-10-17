@@ -77,6 +77,22 @@ class Settings:
     cf_account_id: str = ""
     d1_database_id: str = ""
     cf_d1_token: str = field(default="", repr=False)
+    telegram_bot_token: str = field(default="", repr=False)
+    telegram_chat_id: str = field(default="", repr=False)
+
+    def require_telegram(self) -> tuple[str, str]:
+        """The weekly report's destination; refuse rather than guess when either is missing."""
+        missing = [
+            name
+            for name, value in (
+                ("TELEGRAM_BOT_TOKEN", self.telegram_bot_token),
+                ("TELEGRAM_CHAT_ID", self.telegram_chat_id),
+            )
+            if not value
+        ]
+        if missing:
+            raise ConfigError(f"missing environment variable(s): {', '.join(missing)}")
+        return self.telegram_bot_token, self.telegram_chat_id
 
     def require_fd_org(self) -> str:
         """The legal gate (CLAUDE.md section 4): refuse unless the flag is on and a token exists."""
@@ -112,4 +128,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         cf_account_id=source.get("CF_ACCOUNT_ID", "").strip(),
         d1_database_id=source.get("D1_DATABASE_ID", "").strip(),
         cf_d1_token=source.get("CF_D1_TOKEN", "").strip(),
+        telegram_bot_token=source.get("TELEGRAM_BOT_TOKEN", "").strip(),
+        telegram_chat_id=source.get("TELEGRAM_CHAT_ID", "").strip(),
     )

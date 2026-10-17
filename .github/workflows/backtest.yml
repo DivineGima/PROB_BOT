@@ -1,0 +1,53 @@
+name: backtest
+
+# Monthly walk-forward backtest on the stored matches (architecture sections 9.3 and 14, ADR-046).
+# It compares the result with the previous comparable backtest; a model that got worse by more than
+# the tolerance makes the run exit 4 (red) and writes an alert event. That is information for
+# Divine, never a deploy block. Only the D1 variables are given to the job.
+on:
+  schedule:
+    - cron: "23 3 1 * *" # 03:23 UTC on the 1st, a non-round minute (GitHub delays the top of the hour)
+  workflow_dispatch:
+    inputs:
+      test_days:
+        description: "Length of the test period in days"
+        type: string
+        required: false
+        default: "365"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: footy-data
+  cancel-in-progress: false
+
+jobs:
+  backtest:
+    name: footy backtest (regression check)
+    # Only the reviewed code on main may touch the database (CLAUDE.md: no unreviewed deploys).
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned, hash-checked dependencies
+        run: python -m pip install --require-hashes -r apps/fit/requirements.txt
+      - name: Backtest
+        working-directory: apps/fit
+        env:
+          # The input reaches the shell only as an environment variable, never inside the script.
+          TEST_DAYS: ${{ inputs.test_days || '365' }}
+          PYTHONPATH: src
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+          CF_D1_TOKEN: ${{ secrets.CF_D1_TOKEN }}
+          GITHUB_SHA: ${{ github.sha }}
+        # One half-life and one shrinkage (the production values) so the result is comparable with
+        # the previous month's and can serve as the ensemble prior.
+        run: python -m footy.cli backtest --models dc,pi,bp --test-days "$TEST_DAYS" --half-lives 300 --shrinks 4 --fail-on-regression

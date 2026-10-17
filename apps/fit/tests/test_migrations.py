@@ -15,6 +15,7 @@ STAGE_2_TABLES = {"competitions", "teams", "team_aliases", "matches", "source_fe
 STAGE_4_TABLES = {"model_runs", "active_run", "model_params", "team_form"}
 STAGE_5A_TABLES = {"fixture_forecasts"}
 STAGE_5B_TABLES = {"predictions", "omissions"}
+STAGE_6_TABLES = {"calibration_snapshots"}
 
 
 def migration_files() -> list[Path]:
@@ -47,21 +48,32 @@ def test_migration_files_are_sequential_and_named() -> None:
         assert name.startswith(f"{index:04d}_"), f"gap or misnumbering at {name}"
 
 
-def test_applies_cleanly_to_an_empty_database_and_creates_only_stage_1_to_5b_tables(
+def test_applies_cleanly_to_an_empty_database_and_creates_the_stage_1_to_6_tables(
     db: sqlite3.Connection,
 ) -> None:
     apply(db, migration_files())
-    expected = STAGE_1_TABLES | STAGE_2_TABLES | STAGE_4_TABLES | STAGE_5A_TABLES | STAGE_5B_TABLES
+    expected = (
+        STAGE_1_TABLES
+        | STAGE_2_TABLES
+        | STAGE_4_TABLES
+        | STAGE_5A_TABLES
+        | STAGE_5B_TABLES
+        | STAGE_6_TABLES
+    )
     assert tables(db) >= expected
-    # ADR-033: later-stage tables must not exist yet.
-    assert not {"calibration_snapshots"} & tables(db)
 
 
 def test_applies_step_by_step_on_top_of_the_previous_schema(db: sqlite3.Connection) -> None:
     for path in migration_files():
         apply(db, [path])
-    expected = STAGE_1_TABLES | STAGE_2_TABLES | STAGE_4_TABLES | STAGE_5A_TABLES | STAGE_5B_TABLES
-    assert tables(db) >= expected
+    assert tables(db) >= (
+        STAGE_1_TABLES
+        | STAGE_2_TABLES
+        | STAGE_4_TABLES
+        | STAGE_5A_TABLES
+        | STAGE_5B_TABLES
+        | STAGE_6_TABLES
+    )
 
 
 def test_uploads_defaults_to_received_and_checks_status(db: sqlite3.Connection) -> None:
@@ -195,3 +207,45 @@ def test_stage_4_registry_rules_in_the_schema(db: sqlite3.Connection) -> None:
     with pytest.raises(sqlite3.IntegrityError):
         db.execute(form)
     assert db.execute("SELECT shots_n, season_sf FROM team_form").fetchone() == (None, None)
+
+
+def test_a_calibration_snapshot_needs_at_least_one_scored_prediction(
+    db: sqlite3.Connection,
+) -> None:
+    apply(db, migration_files())
+    insert = (
+        "INSERT INTO calibration_snapshots (created_at, window_from, window_to, n_scored, "
+        "metrics_json) VALUES ('t', '2026-10-01', '2026-10-07', ?, '{}')"
+    )
+    db.execute(insert, (5,))
+    with pytest.raises(sqlite3.IntegrityError):
+        db.execute(insert, (0,))
+    # run_id is a plain column (ADR-045): a snapshot may name a run that was pruned later
+    db.execute(
+        "INSERT INTO calibration_snapshots (created_at, window_from, window_to, n_scored, "
+        "metrics_json, run_id) VALUES ('t', 'a', 'b', 1, '{}', 'R-gone')"
+    )
+
+
+def test_a_prediction_can_outlive_its_run(db: sqlite3.Connection) -> None:
+    """ADR-045: predictions copy what they need and hold no foreign key to model_runs, so pruning
+    old runs never fails because a prediction names them."""
+    apply(db, migration_files())
+    db.execute("INSERT INTO competitions (comp_code, name) VALUES ('EPL', 'x')")
+    db.execute(
+        "INSERT INTO teams (team_id, canonical_name, active) VALUES (1, 'A', 1), (2, 'B', 1)"
+    )
+    db.execute("INSERT INTO uploads (update_id, received_at) VALUES (1, 't')")
+    db.execute(
+        "INSERT INTO model_runs (run_id, status, started_at) VALUES ('R1', 'superseded', 't')"
+    )
+    db.execute(
+        "INSERT INTO predictions (fixture_key, upload_id, run_id, label, comp_code, match_date, "
+        "kickoff_utc, home_team_id, away_team_id, p_home, p_draw, p_away, p_over_05, p_over_15, "
+        "p_over_25, p_over_35, p_over_45, p_over_55, total_json, models_json, weights_json, "
+        "drift_json, baseline_json, inputs_json, created_at) VALUES ('k', 1, 'R1', 'l', 'EPL', "
+        "'2026-10-17', 't', 1, 2, 0.5, 0.3, 0.2, 0.9, 0.7, 0.5, 0.3, 0.2, 0.1, '[]', '{}', '{}', "
+        "'{}', '{}', '{}', 't')"
+    )
+    db.execute("DELETE FROM model_runs WHERE run_id = 'R1'")
+    assert db.execute("SELECT COUNT(*) FROM predictions").fetchone() == (1,)

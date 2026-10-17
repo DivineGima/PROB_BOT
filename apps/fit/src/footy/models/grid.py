@@ -60,6 +60,24 @@ class Markets:
             "total_pmf": list(self.total_pmf),
         }
 
+    @classmethod
+    def from_dict(cls, data: object) -> Markets:
+        """Rebuild markets from ``as_dict`` output (for example a stored baseline snapshot).
+        Raises ``GridError`` for anything that is not a complete, finite set of probabilities."""
+        if not isinstance(data, dict):
+            raise GridError("markets must be an object")
+        try:
+            p = [float(data[k]) for k in ("p_home", "p_draw", "p_away")]
+            overs = tuple(float(v) for v in data["overs"])
+            total = tuple(float(v) for v in data["total_pmf"])
+        except (KeyError, TypeError, ValueError):
+            raise GridError("markets are incomplete or not numeric") from None
+        if len(overs) != len(OVER_LINES) or len(total) != TOTAL_CATEGORIES:
+            raise GridError("markets have the wrong number of lines or total categories")
+        if not all(math.isfinite(v) and 0.0 <= v <= 1.0 for v in (*p, *overs, *total)):
+            raise GridError("market probabilities must be finite and within 0..1")
+        return cls(p[0], p[1], p[2], overs, total)
+
 
 MIN_RATE = 0.01
 # Floor of the bivariate Poisson covariance rate. It sits BELOW the fit's own lower bound

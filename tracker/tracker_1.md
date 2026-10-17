@@ -433,3 +433,31 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 | Stages 1 to 4 | **complete**; review findings repaired |
 | Stages 5 to 7 | not started (Stages 5 and 7 wait for the new architecture version) |
 
+---
+
+## 2026-10-17 (night) - Version 2 written; Stages 5a, 5b and 6 built (code complete; live verification pending)
+
+- **Built against:** `PRD_2.md`, `system_architecture_2.md`, `system_architecture_essential_2.md` (all N=2; alignment and drift checks clean). Branch `feat/stage-5-6-forecasts`, from `main` after PR #20.
+- **Why version 2 (Divine's decision of 2026-10-16, ADR-037, made a design on 2026-10-17 with Divine's authorisation):** the Worker CPU gate failed (p95 16 ms after the trims against a 6 ms target), so the nightly job now computes and stores one forecast per scheduled fixture and the Worker only looks it up. Numbered **2, not 3**, because `claude.md` requires PRD, architecture and essentials to share N with no gaps; renaming is trivial if Divine wants another number. **Essentials 1 Stages 5 and 7 are superseded and Stage 6 re-specified by essentials 2** (Rev-5 notes in essentials 1); for the read order, essentials 1 has no remaining incomplete stage (Stages 1 to 4 complete, 5 to 7 superseded).
+- **Done (tests green: 548 pytest, 212 Vitest, 50 script tests; ruff, mypy strict, tsc, Biome on changed files, repo rule checks, migration lint):**
+  1. Documents: PRD_2 (changelog, decisions 27 to 29), architecture 2 (changelog with Downstream Impact, `fixture_forecasts`, section 8.11, ADR-042 to ADR-046, as-built 19.1), essentials 2 (Stages 5a, 5b, 6, 7 changes).
+  2. **Stage 5a (Python):** `footy/drift.py`, migration `0004`, `footy/forecast`, `ForecastRepo`; `fit` writes the forecasts and records `n_forecast_fixtures`; the promotion gate requires them; `publish` prunes forecasts beyond 5 runs; rollback warns when a run has none.
+  3. **Stage 5b (Worker):** Zod contract + generated `packages/contracts/screener_v1.schema.json` (drift test), intake guards, plain-`fetch` Telegram client (no grammY, ADR-043), forecast/prediction/team repos, migration `0005` (`predictions`, `omissions`), upload pipeline (`received` row first, copy of the stored forecast, first prediction wins, persist then reply), reply formatter with IST `+1d` and splitting, usage hint, stale/model/no-forecast banners; bot token readable only in `telegram/` (repo check extended).
+  4. **Stage 6 (Python):** `footy score` (scored / void by reason / `NO_RESULT` after 3 days, idempotent, one alert), rolling per-model RPS feeding `fit` (alignment rule), `footy report` (metrics, paired bootstrap interval, honest wording, matplotlib chart, `calibration_snapshots` via migration `0006`, Telegram sender), backtest regression check, `data.yml` (`score`, `report`), `backtest.yml`, whole-nightly-job test, `matplotlib` pinned with hashes.
+- **Hand mutations (33 over the three stages, each caught).** One mutation (moving the `uploads` insert after the download) could not be expressed as a single text edit; that rule is covered by the killed-Worker test instead.
+- **Findings while building:** (a) `INSERT OR IGNORE` also skips rows that break a CHECK instead of raising (documented, covered by tests; the pipeline fails loudly if a row cannot be read back). (b) the exclusion-gate regex `` missed `G2_EARLY_SEASON` (underscore is a word character); caught by a test, fixed. (c) `predictions.run_id` has no foreign key (ADR-045), otherwise pruning old runs would fail on logged predictions. (d) An immutability trigger on `predictions` was written and then removed: the architecture asks for the invariant to be enforced in code and tests, and a trigger body in a migration is a deploy risk that cannot be repaired after merge (merged migrations are immutable); tests pin that only the result columns are ever written.
+- **Not verifiable here (needs Divine and production), tracked as in-progress:**
+  1. Merge, then the deploy applies migrations 0004 to 0006.
+  2. Add the Worker secret `TELEGRAM_BOT_TOKEN` and the GitHub secret `TELEGRAM_CHAT_ID`.
+  3. Run `fit` and `publish` from Actions. **Until then the active run has no forecasts and every match would be `NO_FORECAST`.**
+  4. A real upload, then the Stage 5b CPU gate (p95 on 15, 60 and 100 matches, target 6 ms) and the 30 s reply target; the live `json_each` insert; `score`; `report --send`; the first `backtest.yml` run. Checklist: `docs/setup.md` C13 and `docs/verification.md` section 7.
+- **Carried forward (unchanged):** the `claude.md` in-place-edit wording (it has no recorded exception for Rev-1 to Rev-4 or for the version files written at Divine's instruction), the missing `SYETEM DESIGN RULES.html`, git identity, live `d1-probe`. New: Stage 7 gains a watchdog check for missing forecasts (essentials 2).
+
+### Module status
+| Module | Status |
+|---|---|
+| Stages 1 to 4 | **complete** |
+| Stage 5a: nightly forecasts (Python) | code **complete**; first live `fit` + `publish` **in-progress** |
+| Stage 5b: Telegram bot | code **complete**; real upload, CPU gate and reply-time check **in-progress** |
+| Stage 6: scoring, calibration, weekly report | code **complete**; first scored predictions and a delivered report **in-progress** |
+| Stage 7: alerts, watchdog, schedule, go-live | not started (essentials 2 Stage 7) |

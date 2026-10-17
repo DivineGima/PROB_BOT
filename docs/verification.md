@@ -15,6 +15,8 @@ What was verified, how, and what is still open. Numbers marked **indicative** ar
 | 7 | Worker CPU of the real engine (ADR-013 spike) | **Measured in production: gate failed.** p95 22 ms, then 16 ms after the F1 trims (p50 3 ms, max 22 ms). Divine chose pre-computed grids (architecture ADR-037) | Section 2 |
 | 8 | Pi-rating constants | **Verified in Stage 4 (2026-10-17), with one caveat**: lambda 0.035, gamma 0.7, b 10, c 3, psi(e) = 3 log10(1+e), every team starts at 0. See section 6 | Section 6 |
 
+| 9 | [v2] D1 accepts `INSERT ... SELECT ... FROM json_each(?1)` with one JSON bound parameter | **Local D1 (workerd) verified**: 100 predictions in one statement, doubles round-trip exactly. **Live D1: to confirm** in the first real upload (section 7) | `apps/bot/test/forecast-repo.test.ts`, `upload.test.ts` |
+
 Other facts found while building (re-verify, limits change):
 - D1 Free daily row read and write limits have been **hard-enforced since 2026-09-01**: queries fail until 00:00 UTC. The client raises `D1QuotaError` and does not retry.
 - Workers Free CPU limit and request limits: as in architecture section 16 (not re-checked this session).
@@ -150,3 +152,25 @@ First real `fit` (run 38981127749) and `publish` (run 38981213952): all three mo
 
 **Review fixes (2026-10-17, after the code review of Stages 3 and 4).** All nine findings and the missing drift override were repaired; the tracker has the list. Two measurable effects: the bivariate Poisson fit is about twice as fast, and the shared-covariance floor no longer inflates a small fitted lambda3. **The backtest numbers above were produced before these fixes**; two of them can move slightly (the ensemble row, because its weights now use aligned histories, and any bivariate Poisson row with a very small covariance). Re-run the three-model backtest after merging to refresh them; no conclusion is expected to change.
 
+
+## 7. Stages 5 and 6 (version 2: nightly forecasts, the bot, scoring, the weekly report)
+
+**Verified locally (2026-10-17):** Python 548 tests, Worker 212 tests, script tests 50, ruff, `mypy --strict`, `tsc`, Biome, repo rule checks and migration lint all green; 33 hand mutations of the new rules (forecast weights, gate, drift boundary, first-prediction-wins, time checks, 429 handling, download cap, bidi characters, replay, settle rules, alignment, bootstrap seed, regression tolerance, snapshot order) each failed a test.
+
+**What the local tests prove and what they cannot:**
+- The bot's behaviour against a fake Telegram and a local D1 (workerd): every row of the behaviour matrix, copy-exactness of the forecast into the log, first prediction immutable (also under two uploads at once and under a changed forecast), omission reasons, banners, hostile text, 100 matches, failure injection.
+- It cannot prove: Telegram's real behaviour, the CPU time on the real Worker, or `sendPhoto` from GitHub.
+
+**To record after the live run (Divine runs, Claude Code records):**
+
+| # | Check | Target | Result |
+|---|---|---|---|
+| 1 | Worker CPU p95, uploads of 15, 60 and 100 matches (Workers Logs `cpuTime`) | at most 6 ms, nothing near 10 ms | _pending_ |
+| 2 | Upload to first reply, p95 (NFR-11) | at most 30 s | _pending_ |
+| 3 | `INSERT ... json_each` works on the live D1 | first upload creates predictions | _pending_ |
+| 4 | Forecast rows per night and per run | about 75 to 400 rows | _pending_ |
+| 5 | `report --send` delivers text and chart | both arrive in the private chat | _pending_ |
+| 6 | First scored predictions after `score` | status `scored` for played matches | _pending_ |
+| 7 | `backtest.yml` first scheduled run | green or an understood red | _pending_ |
+
+If check 1 misses, the next steps are the F1 trims of the remaining parse and validation work (a hand validator instead of Zod), then escalation to Divine (architecture section 8.10).

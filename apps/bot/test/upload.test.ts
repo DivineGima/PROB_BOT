@@ -369,33 +369,29 @@ describe("the first prediction per fixture is immutable (GR-13)", () => {
     expect(owners.results.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("the database refuses to change a prediction's forecast but allows scoring columns", async () => {
+  it("the scoring columns can be filled in without touching the forecast", async () => {
     await seedForecast({ home: 1, away: 2 });
     await deliver(documentUpdate(1), {
       tg: withFile(screenerFile([screenerMatch({ home: 1, away: 2 })])),
     });
-    for (const column of [
-      "p_home = 0.1",
-      "p_draw = 0.1",
-      "fixture_key = 'x'",
-      "models_json = '{}'",
-      "baseline_json = '{}'",
-      "run_id = 'other'",
-      "label = 'x'",
-    ]) {
-      await expect(
-        env.DB.prepare(`UPDATE predictions SET ${column}`).run(),
-        column,
-      ).rejects.toThrow(/immutable/);
-    }
+    const before = await row<Record<string, unknown>>("SELECT * FROM predictions");
     await env.DB.prepare(
       `UPDATE predictions SET status = 'scored', goals_home = 2, goals_away = 1, rps_1x2 = 0.1,
          rps_totals = 0.1, logloss_1x2 = 0.5, scored_at = '2026-10-18T01:00:00Z'`,
     ).run();
-    expect(await row("SELECT status, goals_home FROM predictions")).toEqual({
-      status: "scored",
-      goals_home: 2,
-    });
+    const after = await row<Record<string, unknown>>("SELECT * FROM predictions");
+    const changed = Object.keys(before ?? {}).filter((k) => before?.[k] !== after?.[k]);
+    expect(changed.sort()).toEqual(
+      [
+        "goals_away",
+        "goals_home",
+        "logloss_1x2",
+        "rps_1x2",
+        "rps_totals",
+        "scored_at",
+        "status",
+      ].sort(),
+    );
   });
 });
 

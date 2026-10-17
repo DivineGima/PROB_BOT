@@ -1681,3 +1681,20 @@ Recorded at Divine's explicit instruction after the live runs and a code review 
 ## 19. Version 2 (2026-10-17): nightly pre-computed forecasts
 
 The version-2 design is the changelog at the top, §5.4 (`fixture_forecasts`), §5.5 (predictions without a grid, `NO_FORECAST`), §6.5 and §6.7 (modules and commands), §7 (diagrams and structure), §8.4 (drift in Python), §8.6 (gate), §8.7 (copy-on-insert, scoring, report), §8.10 and §8.11 (CPU and the forecast step), §9 (secrets, workflows, tests), §14 (ADR-042 to ADR-046) and §15 (R-P1, R-O7). Items still to be decided by Divine are the same open items as before (the `claude.md` in-place-edit wording, the missing rules file, git identity); nothing in version 2 needs a new decision from Divine.
+
+### 19.1 As built (2026-10-17, Stages 5a, 5b and 6)
+
+Differences between the text above and the code, found while building. None changes a requirement.
+
+| Where | As built |
+|---|---|
+| §6.1 business checks, order | A fixture that is **already in the log** is shown from the log before the time checks, so a re-upload after kickoff still returns the stored numbers marked "already logged"; a new fixture then goes `DATE_MISMATCH`, `STARTED`, `TOO_FAR`, `UNMAPPED_TEAM`, `DUPLICATE_PAIR`, forecast lookup. `home` equal to `away` is rejected by the schema (fatal), not omitted |
+| §5.5 `omissions` | The unique key is (`upload_id`, `label`); a repeated `match_id` is stored under `<match_id>#2`, `#3`, so every omission keeps a row. `DUPLICATE_PAIR` covers a repeated label and the same fixture listed twice |
+| §5.5 insert | `INSERT OR IGNORE` also skips a row that breaks a CHECK constraint instead of raising. Forecast rows already satisfy the same CHECKs, so a skipped row is a bug; the pipeline then cannot read the row back and answers `E_INTERNAL` with an id rather than a wrong reply |
+| §6.5 Worker | `handleFetch(request, env, ctx, services)`; `Services` carries `fetch`, `now`, `newErrorId` and `sleep` so tests inject a fake Telegram. Team names are resolved by **exact canonical name** (the contract says canonical); an alias fallback is not built |
+| §6.5 `intake` | `scripts/gen-screener-schema.mjs` writes `packages/contracts/screener_v1.schema.json` from the Zod schema; `scripts/contracts.test.mjs` fails if the two differ. `MAX_MATCHES` lives in `intake/schema.ts` so the generator loads it under plain Node |
+| §8.7 reply | Team names in a published block come from the file only after they resolved to the canonical table; omitted lines show sanitised file text (control and direction characters removed, length capped) |
+| §8.11 | `footy fit` builds forecasts after `team_form` and records `n_forecast_fixtures`; there is no separate `footy forecast` command (a rerun of `fit` and `publish` is the way to refresh them) |
+| §9.1, §9.3 | New GitHub secret `TELEGRAM_CHAT_ID`; `matplotlib 3.11.2` joins the pinned Python dependencies; `data.yml` gained `score` and `report`; `backtest.yml` is monthly with `--fail-on-regression` |
+| §8.3, ADR-046 | `fit` reads the newest `3 x 200` scored predictions and keeps those every fitted model forecast; the weights use the last 200 of those |
+| §5.4 | `delete_runs` removes a run's forecasts before the run; `publish` also prunes forecasts beyond the newest 5 runs |

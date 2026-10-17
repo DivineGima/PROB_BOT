@@ -34,6 +34,7 @@ from footy.config import (
     STABILITY_BOUND,
     STALE_HOURS,
 )
+from footy.ensemble.history import model_rps_series
 from footy.ensemble.weights import ensemble_weights, prior_from_backtest
 from footy.errors import DataError, ExitCode
 from footy.forecast import build_forecasts
@@ -50,12 +51,16 @@ from footy.repo.matches import MatchesRepo
 from footy.repo.models import STATUS_BUILDING, STATUS_FAILED, ModelRegistryRepo, ParamRow, RunRecord
 from footy.repo.ops import OpsRepo
 from footy.repo.ports import Database
+from footy.repo.predictions import PredictionsRepo
 from footy.repo.training import TrainingRepo
 from footy.scoring import FrequencyBaseline
 
 log = logging.getLogger("footy.fit")
 
-CODE_VERSION = "stage-5a"
+CODE_VERSION = "stage-6"
+# Fetch more scored predictions than the window needs, because only those every fitted model
+# forecast count (the alignment rule of footy.ensemble.history).
+HISTORY_FETCH_FACTOR = 3
 
 
 def run_id_for(at: str) -> str:
@@ -159,7 +164,16 @@ def run_fit_job(
             if ok
             else {}
         )
-        weights = ensemble_weights(ok, prior_rps=prior) if ok else None
+        # Rolling weights (ADR-046): the per-model RPS of the newest scored predictions that every
+        # fitted model forecast; with none yet the backtest prior (or equal weights) decides.
+        history = (
+            model_rps_series(
+                PredictionsRepo(db).recent_scored(ENSEMBLE_RECENT * HISTORY_FETCH_FACTOR), ok
+            )
+            if ok
+            else {}
+        )
+        weights = ensemble_weights(ok, history=history, prior_rps=prior) if ok else None
         forms = build_team_form(matches, active_ids, day, cfg.window_days) if ok else []
         today = date.fromisoformat(started[:10])
         fixtures = (
