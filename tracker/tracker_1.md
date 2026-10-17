@@ -461,3 +461,35 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 | Stage 5b: Telegram bot | code **complete**; real upload, CPU gate and reply-time check **in-progress** |
 | Stage 6: scoring, calibration, weekly report | code **complete**; first scored predictions and a delivered report **in-progress** |
 | Stage 7: alerts, watchdog, schedule, go-live | not started (essentials 2 Stage 7) |
+
+---
+
+## 2026-10-17 (night, later) - Code review of Stages 5a, 5b and 6 (PR 21); findings repaired; source of truth re-aligned
+
+- **Built against:** `PRD_2.md`, `system_architecture_2.md`, `system_architecture_essential_2.md` (all N=2). Branch `feat/stage-5-6-forecasts`, PR 21.
+- **Review:** `/code-review` at high effort over PR 21: 9 findings. Each was checked against the code before acting. **7 real and fixed, 1 not a defect, 1 real but outside this PR (recorded, not changed).** Tests: 564 pytest, 216 Vitest, 50 script tests; ruff, mypy strict, tsc, Biome on changed files, repo rule checks and migration lint clean; 7 further hand mutations of the fixes, each caught.
+
+| # | Where | Problem | Why it matters | Fix |
+|---|---|---|---|---|
+| 1 | `score/settle.py` | A finished match with an unverified score was voided `UNVERIFIED_RESULT` at first sight | Reconcile lets `unverified` become `regular` or `ft_90` later, but the void is final (updates are guarded by `status = 'pending'`), so a scoreable prediction was lost from the 300-match sample | It now waits the same 3 days as a missing result, then voids; an `AWARDED` match is still void at once. Tests: waits, scores once verified, voids after the window |
+| 2 | Worker `repo` | `INSERT OR IGNORE` also skips rows that break a CHECK or NOT NULL; the upload was finalised `processed` and then the read-back failed | A bad row gave an error reply for an upload the log called processed, and the watchdog could not see it | `INSERT ... ON CONFLICT (fixture_key) DO NOTHING`: only the key clash is ignored, a bad row raises, the batch (predictions, omissions, upload close) rolls back and the upload stays `received`. Omissions use a plain `INSERT`. Tests for both |
+| 3 | `repo/forecasts.py` | `prune` counted failed, rejected and building runs among the newest 5 | After a few bad nights the rollback target lost its forecasts | Slots go to `active`, `superseded` and `building` runs only; rejected and failed runs lose theirs. Test with two dead runs |
+| 4 | `repo/predictions.py` | Omissions were counted per upload but published predictions once per fixture | Each re-upload of the same file raised the omission rate in the weekly report | Both sides are counted per processed upload, so a re-upload leaves the rate unchanged. Test |
+| 5 | `system_architecture_1.md` | Reported as edited in place | Would break the "never edit a prior version" rule | **Not a defect:** the file has no diff in this PR (checked with `git diff origin/main`). Essentials 1 did get the Rev-5 supersession notes, as recorded |
+| 6 | `backtest/job.py` `_memoised` | The pi-rating cache key lists the config fields it reads by hand | A future field change could silently reuse a fit in a sweep | **Pre-existing code (PR 20), not touched by this work. Not changed here.** Follow-up: fit the pi-rating once outside the sweep loop, or let the fitter declare its fields |
+| 7 | Worker `repo` | `insertManyIgnoreDuplicates` and `commit` built the same insert twice; the active-run SELECT and its mapping appeared twice | Two paths could drift apart; tests exercised the one production does not use | One `predictionStatement` helper, one `POINTER_SQL` and `toPointer`; the method stays because the architecture names it and tests now cover the `commit` path |
+| 8 | `publish/gate.py` | A run with zero forecasts passed the count check and could replace a run that still served the next days | A fit that found no fixtures (ingest not yet run, a feed gap) silenced the bot until the next fit | New carry-over check: the new run must forecast at least 50% of the fixtures the active run forecasts for the new run's start date or later (`GATE_FORECAST_CARRYOVER`, unvalidated); skipped by `--accept-drift` |
+| 9 | Worker `upload` | A second listing of an already-logged fixture fell through to the time checks | It could be reported as `STARTED` or `TOO_FAR` instead of a duplicate | The repeat is `DUPLICATE_PAIR`. Also: a repeated `match_id` now takes the next free numbered label, never one that exists in the file, so an omission row is never lost |
+
+- **Source-of-truth alignment (after the review, compared with the code):**
+  - `system_architecture_2.md` **corrected**: section 3.3, 5.4, 8.6 (carry-over subsection), 8.7 (conflict-only insert, unverified wait, per-upload omission rate), 8.11 (which runs keep forecasts), 9.5 and 9.6 (insert wording), and the as-built table 19.1.
+  - `system_architecture_essential_2.md` **corrected**: Stage 5a step 5 (pruning and carry-over), Stage 5b step 5 (the insert), Stage 6 steps 1 and 4.
+  - `PRD_2.md` **not touched**: no requirement changed or was contradicted. `PRD_1.md`, `system_architecture_1.md`, `essential_1.md` not touched.
+- **Still open (unchanged):** the live checks listed in the previous entry (secret, `fit` + `publish`, a real upload, CPU gate, `report`), and: the `claude.md` in-place-edit wording, the missing `SYETEM DESIGN RULES.html`, git identity, live `d1-probe`. New follow-up: the pi-rating memoisation key (finding 6).
+
+### Module status
+| Module | Status |
+|---|---|
+| Stages 1 to 4 | **complete** |
+| Stage 5a, 5b, 6 | code **complete and reviewed**; live verification **in-progress** (needs Divine) |
+| Stage 7 | not started |

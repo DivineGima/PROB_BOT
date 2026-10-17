@@ -4,7 +4,8 @@ A pending prediction is matched to the stored match with the same ``(match_date,
 away)``. Then:
 
 * ``FINISHED`` with a verified 90-minute score -> scored (RPS 1X2, RPS totals, log loss);
-* ``FINISHED`` with an unverified score -> void ``UNVERIFIED_RESULT``;
+* ``FINISHED`` with an unverified score -> pending (the source can still add the 90-minute score),
+  void ``UNVERIFIED_RESULT`` once ``NO_RESULT_DAYS`` have passed since kickoff;
 * ``POSTPONED``, ``CANCELLED``, ``SUSPENDED``, ``AWARDED`` -> void under that name;
 * anything else (still scheduled or in play, or no matching row at all, which is what a
   rescheduled match looks like because its date changed) -> pending, until ``NO_RESULT_DAYS`` have
@@ -80,7 +81,11 @@ def settle(p: PendingPrediction, now: datetime) -> Settlement:
             and p.match_goals_away is not None
         )
         if not verified:
-            return Settlement(p.pred_id, VOID, UNVERIFIED_RESULT)
+            # The source may still add the 90-minute score (unverified -> verified is allowed), so
+            # wait out the same window as a missing result before giving the prediction up.
+            if now >= kickoff_of(p) + timedelta(days=NO_RESULT_DAYS):
+                return Settlement(p.pred_id, VOID, UNVERIFIED_RESULT)
+            return Settlement(p.pred_id, PENDING)
         goals_home, goals_away = int(p.match_goals_home or 0), int(p.match_goals_away or 0)
         pmf = _total_pmf(p.total_json)
         if pmf is None:

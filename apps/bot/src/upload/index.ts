@@ -250,7 +250,8 @@ async function run(
   const forecastByKey = new Map<string, ForecastRow>(read.forecasts.map((f) => [f.fixtureKey, f]));
   const existingByKey = new Map<string, StoredPrediction>(existing.map((p) => [p.fixtureKey, p]));
   const seenKeys = new Set<string>();
-  const labelCounts = new Map<string, number>();
+  const usedLabels = new Set<string>();
+  const fileLabels = new Set(screener.matches.map((x) => x.match_id));
 
   const created: NewPrediction[] = [];
   const omissions: NewOmission[] = [];
@@ -270,17 +271,17 @@ async function run(
       });
     };
 
-    const seenBefore = labelCounts.get(m.match_id) ?? 0;
-    labelCounts.set(m.match_id, seenBefore + 1);
-    if (seenBefore > 0) {
-      // Omission labels are unique per upload; a repeated match_id gets a numbered label.
-      omit(
-        "DUPLICATE_PAIR",
-        "the match_id is repeated in the file",
-        `${m.match_id}#${seenBefore + 1}`,
-      );
+    if (usedLabels.has(m.match_id)) {
+      // Omission labels are unique per upload: a repeated match_id gets the next free numbered
+      // label, which cannot collide with another match that really has that id.
+      let n = 2;
+      while (usedLabels.has(`${m.match_id}#${n}`) || fileLabels.has(`${m.match_id}#${n}`)) n++;
+      const label = `${m.match_id}#${n}`;
+      usedLabels.add(label);
+      omit("DUPLICATE_PAIR", "the match_id is repeated in the file", label);
       continue;
     }
+    usedLabels.add(m.match_id);
 
     const homeId = teamIds.get(m.home);
     const awayId = teamIds.get(m.away);
@@ -289,7 +290,11 @@ async function run(
     // A fixture that is already logged is shown from the log, whatever the clock says now.
     if (homeId !== undefined && awayId !== undefined && matchDate === runDate) {
       const key = fixtureKey(matchDate, m.competition, homeId, awayId);
-      if (existingByKey.has(key) && !seenKeys.has(key)) {
+      if (seenKeys.has(key)) {
+        omit("DUPLICATE_PAIR", "the same fixture is listed twice");
+        continue;
+      }
+      if (existingByKey.has(key)) {
         seenKeys.add(key);
         plan.push({ key, comp: m.competition, home: m.home, away: m.away, fresh: false });
         continue;

@@ -154,17 +154,44 @@ describe("predictions and omissions constraints (section 5.7)", () => {
     return repos().predictions.insertManyIgnoreDuplicates(uploadId, RUN_ID, [row as NewPrediction]);
   };
 
-  // INSERT OR IGNORE skips a row that violates a CHECK instead of raising, so a bad row is simply
-  // never stored (and the upload pipeline then fails loudly when it cannot read the row back).
-  it("never stores probabilities that do not sum to 1 within 1e-6", async () => {
-    await expect(insert({ p1x2: [0.5, 0.25, 0.26] })).resolves.toBe(0);
+  // Only a clash on the fixture key is ignored. A row that breaks a CHECK raises, so the batch it is
+  // in rolls back and the upload is not finalised with predictions silently missing.
+  it("rejects probabilities that do not sum to 1 within 1e-6 and stores nothing", async () => {
+    await expect(insert({ p1x2: [0.5, 0.25, 0.26] })).rejects.toThrow(/CHECK/);
     expect(await count("predictions")).toBe(0);
     await expect(insert({ p1x2: [0.5, 0.25, 0.25 + 5e-7] })).resolves.toBe(1);
   });
 
-  it("never stores overs that increase with the line", async () => {
-    await expect(insert({ overs: [0.9, 0.8, 0.85, 0.3, 0.2, 0.1] })).resolves.toBe(0);
+  it("rejects overs that increase with the line and stores nothing", async () => {
+    await expect(insert({ overs: [0.9, 0.8, 0.85, 0.3, 0.2, 0.1] })).rejects.toThrow(/CHECK/);
     expect(await count("predictions")).toBe(0);
+  });
+
+  it("still ignores a repeat of a fixture key", async () => {
+    await insert({});
+    const again = await repos().uploads.record({ updateId: 4242 });
+    expect(
+      await repos().predictions.insertManyIgnoreDuplicates(again, RUN_ID, [
+        prediction(1, 2, [0.9, 0.05, 0.05]),
+      ]),
+    ).toBe(0);
+    expect((await repos().predictions.findByDate(RUN_DATE))[0]?.p1x2[0]).toBe(0.5);
+  });
+
+  it("a bad prediction in a commit rolls the whole batch back and leaves the upload received", async () => {
+    const uploadId = await newUpload(777);
+    await expect(
+      repos().uploads.commit({
+        uploadId,
+        runId: RUN_ID,
+        predictions: [prediction(1, 2, [0.5, 0.25, 0.25]), prediction(3, 4, [0.9, 0.9, 0.9])],
+        omissions: [{ label: "o", reason: "NO_FORECAST" }],
+        finalisation: { status: "processed" },
+      }),
+    ).rejects.toThrow(/CHECK/);
+    expect(await count("predictions")).toBe(0);
+    expect(await count("omissions")).toBe(0);
+    expect(await count("uploads", "status = 'received'")).toBe(1);
   });
 
   it("rejects a scored row without a result and a void row without a reason", async () => {

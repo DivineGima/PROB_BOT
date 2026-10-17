@@ -58,6 +58,9 @@ STALE_HOURS = 36  # STALE MODELS banner age (ADR-015)
 STABILITY_BOUND = 0.5  # promotion gate: largest allowed move of a team value versus the active run
 GATE_FORM_COVERAGE = 0.95  # team_form must cover this share of active teams
 GATE_PAYLOAD_COVERAGE = 0.95  # a payload must cover this share of teams with training matches
+GATE_FORECAST_CARRYOVER = (
+    0.5  # a new run must forecast this share of the active run's upcoming fixtures
+)
 ENSEMBLE_KAPPA = 100.0  # softmax sharpness on mean RPS (RPS differences between models are tiny)
 ENSEMBLE_RECENT = 200  # most recent scored predictions used for the rolling RPS
 ENSEMBLE_SHRINK_N = 50  # pseudo-count of the prior in the weight shrinkage

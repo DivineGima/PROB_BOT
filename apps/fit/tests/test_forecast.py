@@ -446,3 +446,94 @@ def test_a_rollback_to_a_run_without_forecasts_succeeds_with_a_warning(
     assert result.summary["forecast_rows"] == 0 and "no stored forecasts" in str(
         result.summary["warning"]
     )
+
+
+def zero_forecasts(db: SqliteD1, run_id: str) -> None:
+    """Make a built run look like a fit that found no fixtures: no rows, count recorded as 0."""
+    db.conn.execute("DELETE FROM fixture_forecasts WHERE run_id = ?", (run_id,))
+    text = db.scalar("SELECT diagnostics_json FROM model_runs WHERE run_id = ?", (run_id,))
+    diagnostics = json.loads(text)
+    diagnostics["n_forecast_fixtures"] = 0
+    db.conn.execute(
+        "UPDATE model_runs SET diagnostics_json = ? WHERE run_id = ?",
+        (json.dumps(diagnostics), run_id),
+    )
+
+
+def test_a_run_with_no_upcoming_forecasts_does_not_replace_one_that_serves_the_next_days(
+    forecasted: SqliteD1,
+) -> None:
+    """Review finding: a fit that found no fixtures (ingest not run, a feed gap) records zero
+    forecasts, passes the count check and would silence the bot until the next fit."""
+    db = clone(forecasted)
+    first = only_run(db)
+    assert run_publish_job(db, now=stamp(2)).exit_code == ExitCode.OK
+    second = str(run_fit_job(db, now=stamp(3)).summary["run_id"])
+    zero_forecasts(db, second)
+    result = run_publish_job(db, now=stamp(4))
+    assert result.exit_code == ExitCode.FIT
+    reasons = result.summary["gate"]["reasons"]  # type: ignore[index]
+    assert any("0 of the 7 upcoming fixtures" in r for r in reasons)
+    assert db.scalar("SELECT run_id FROM active_run") == first
+
+
+def test_the_carry_over_check_is_skipped_by_the_explicit_override(forecasted: SqliteD1) -> None:
+    db = clone(forecasted)
+    assert run_publish_job(db, now=stamp(2)).exit_code == ExitCode.OK
+    second = str(run_fit_job(db, now=stamp(3)).summary["run_id"])
+    zero_forecasts(db, second)
+    result = run_publish_job(db, run_id=second, accept_drift=True, now=stamp(4))
+    assert result.exit_code == ExitCode.OK
+    assert db.scalar("SELECT run_id FROM active_run") == second
+
+
+def test_fixtures_already_in_the_past_do_not_count_toward_the_carry_over(
+    forecasted: SqliteD1,
+) -> None:
+    """A fit made after the active run forecast fixtures were played has nothing to carry over."""
+    db = clone(forecasted)
+    assert run_publish_job(db, now=stamp(2)).exit_code == ExitCode.OK
+    later = str(run_fit_job(db, now=stamp(3, "2026-06-20")).summary["run_id"])
+    result = run_publish_job(db, run_id=later, now=stamp(4, "2026-06-20"))
+    assert result.exit_code == ExitCode.OK, result.summary
+
+
+def test_a_new_run_that_keeps_enough_of_the_upcoming_fixtures_is_promoted(
+    forecasted: SqliteD1,
+) -> None:
+    db = clone(forecasted)
+    assert run_publish_job(db, now=stamp(2)).exit_code == ExitCode.OK
+    second = str(run_fit_job(db, now=stamp(3)).summary["run_id"])
+    drop = db.rows("SELECT fixture_key FROM fixture_forecasts WHERE run_id = ? LIMIT 3", (second,))
+    for r in drop:  # 4 of 7 remain: above the 50% needed
+        db.conn.execute(
+            "DELETE FROM fixture_forecasts WHERE run_id = ? AND fixture_key = ?",
+            (second, r["fixture_key"]),
+        )
+    text = db.scalar("SELECT diagnostics_json FROM model_runs WHERE run_id = ?", (second,))
+    diagnostics = json.loads(text)
+    diagnostics["n_forecast_fixtures"] = 4
+    db.conn.execute(
+        "UPDATE model_runs SET diagnostics_json = ? WHERE run_id = ?",
+        (json.dumps(diagnostics), second),
+    )
+    assert run_publish_job(db, now=stamp(4)).exit_code == ExitCode.OK
+
+
+def test_runs_that_can_never_be_served_do_not_take_a_slot_from_a_rollback_target(
+    forecasted: SqliteD1,
+) -> None:
+    """Review finding: failed and rejected runs counted among the newest N, so after a few bad
+    nights the run you would roll back to lost its forecasts."""
+    db = clone(forecasted)
+    first = only_run(db)
+    assert run_publish_job(db, now=stamp(2)).exit_code == ExitCode.OK
+    second = str(run_fit_job(db, now=stamp(3)).summary["run_id"])
+    assert run_publish_job(db, now=stamp(4)).exit_code == ExitCode.OK  # first is superseded
+    rejected = str(run_fit_job(db, now=stamp(5)).summary["run_id"])
+    failed = str(run_fit_job(db, now=stamp(6)).summary["run_id"])
+    db.conn.execute("UPDATE model_runs SET status = 'rejected' WHERE run_id = ?", (rejected,))
+    db.conn.execute("UPDATE model_runs SET status = 'failed' WHERE run_id = ?", (failed,))
+    ForecastRepo(db).prune(keep_runs=2)
+    remaining = {r["run_id"] for r in db.rows("SELECT DISTINCT run_id FROM fixture_forecasts")}
+    assert remaining == {first, second}

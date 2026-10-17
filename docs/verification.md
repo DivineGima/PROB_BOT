@@ -155,7 +155,7 @@ First real `fit` (run 38981127749) and `publish` (run 38981213952): all three mo
 
 ## 7. Stages 5 and 6 (version 2: nightly forecasts, the bot, scoring, the weekly report)
 
-**Verified locally (2026-10-17):** Python 548 tests, Worker 212 tests, script tests 50, ruff, `mypy --strict`, `tsc`, Biome, repo rule checks and migration lint all green; 33 hand mutations of the new rules (forecast weights, gate, drift boundary, first-prediction-wins, time checks, 429 handling, download cap, bidi characters, replay, settle rules, alignment, bootstrap seed, regression tolerance, snapshot order) each failed a test.
+**Verified locally (2026-10-17):** Python 564 tests, Worker 216 tests, script tests 50, ruff, `mypy --strict`, `tsc`, Biome, repo rule checks and migration lint all green; 40 hand mutations of the new rules (forecast weights, gate, drift boundary, first-prediction-wins, time checks, 429 handling, download cap, bidi characters, replay, settle rules, alignment, bootstrap seed, regression tolerance, snapshot order) each failed a test.
 
 **What the local tests prove and what they cannot:**
 - The bot's behaviour against a fake Telegram and a local D1 (workerd): every row of the behaviour matrix, copy-exactness of the forecast into the log, first prediction immutable (also under two uploads at once and under a changed forecast), omission reasons, banners, hostile text, 100 matches, failure injection.

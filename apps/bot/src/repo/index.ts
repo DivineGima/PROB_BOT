@@ -261,8 +261,14 @@ const toIso = (date: Date): string => `${date.toISOString().slice(0, 19)}Z`;
 /** Bound-parameter cap of one D1 statement is 100; stay below it for `IN (...)` lists. */
 const IN_CHUNK = 90;
 
+/**
+ * Only a clash on the fixture key is ignored (the first prediction for a fixture wins). A row that
+ * breaks a CHECK or NOT NULL constraint RAISES, which rolls the whole batch back and leaves the
+ * upload `received`, so the pipeline answers with an error instead of finalising an upload whose
+ * predictions were silently dropped (code review of PR 21). `INSERT OR IGNORE` would skip those too.
+ */
 const PREDICTION_INSERT = `
-INSERT OR IGNORE INTO predictions (
+INSERT INTO predictions (
   fixture_key, upload_id, run_id, label, comp_code, match_date, kickoff_utc, home_team_id,
   away_team_id, p_home, p_draw, p_away, p_over_05, p_over_15, p_over_25, p_over_35, p_over_45,
   p_over_55, total_json, models_json, weights_json, drift_json, baseline_json, inputs_json,
@@ -278,13 +284,40 @@ SELECT json_extract(j.value, '$.fixture_key'), ?2, ?3, json_extract(j.value, '$.
   json_extract(j.value, '$.total_json'), json_extract(j.value, '$.models_json'),
   json_extract(j.value, '$.weights_json'), json_extract(j.value, '$.drift_json'),
   json_extract(j.value, '$.baseline_json'), json_extract(j.value, '$.inputs_json'), ?4
-FROM json_each(?1) AS j`;
+FROM json_each(?1) AS j
+WHERE 1
+ON CONFLICT (fixture_key) DO NOTHING`;
 
+/** Plain INSERT: labels are unique per upload by construction, so a clash is a bug and must raise. */
 const OMISSION_INSERT = `
-INSERT OR IGNORE INTO omissions (upload_id, label, reason_code, detail_json)
+INSERT INTO omissions (upload_id, label, reason_code, detail_json)
 SELECT ?2, json_extract(j.value, '$.label'), json_extract(j.value, '$.reason'),
   json_extract(j.value, '$.detail')
 FROM json_each(?1) AS j`;
+
+/** The active run's metadata, read through the pointer (one definition for every reader). */
+const POINTER_SQL = `SELECT r.run_id, r.data_cutoff_utc, r.config_json, r.ensemble_json, a.activated_at
+  FROM active_run a JOIN model_runs r ON r.run_id = a.run_id
+  WHERE a.id = 1`;
+
+interface PointerSqlRow {
+  run_id: string;
+  data_cutoff_utc: string | null;
+  config_json: string | null;
+  ensemble_json: string | null;
+  activated_at: string;
+}
+
+function toPointer(row: PointerSqlRow | null | undefined): ActivePointer | null {
+  if (!row) return null;
+  return {
+    runId: row.run_id,
+    activatedAt: row.activated_at,
+    dataCutoffUtc: row.data_cutoff_utc,
+    configJson: row.config_json ?? "{}",
+    ensembleJson: row.ensemble_json ?? "{}",
+  };
+}
 
 const FORECAST_COLUMNS = `fixture_key, comp_code, match_date, kickoff_utc, home_team_id,
   away_team_id, verdict, p_home, p_draw, p_away, p_over_05, p_over_15, p_over_25, p_over_35,
@@ -434,6 +467,13 @@ export function createRepositories(db: D1Database, clock: Clock = () => new Date
     },
   };
 
+  const predictionStatement = (
+    uploadId: number,
+    runId: string,
+    rows: NewPrediction[],
+  ): D1PreparedStatement =>
+    db.prepare(PREDICTION_INSERT).bind(predictionDocument(rows), uploadId, runId, toIso(clock()));
+
   const finaliseStatement = (uploadId: number, result: UploadFinalisation): D1PreparedStatement =>
     db
       .prepare(
@@ -484,14 +524,9 @@ export function createRepositories(db: D1Database, clock: Clock = () => new Date
     },
 
     async commit(commit) {
-      const createdAt = toIso(clock());
       const statements: D1PreparedStatement[] = [];
       if (commit.predictions.length > 0) {
-        statements.push(
-          db
-            .prepare(PREDICTION_INSERT)
-            .bind(predictionDocument(commit.predictions), commit.uploadId, commit.runId, createdAt),
-        );
+        statements.push(predictionStatement(commit.uploadId, commit.runId, commit.predictions));
       }
       if (commit.omissions.length > 0) {
         statements.push(
@@ -548,29 +583,8 @@ export function createRepositories(db: D1Database, clock: Clock = () => new Date
     },
   };
 
-  const readPointer = async (): Promise<ActivePointer | null> => {
-    const row = await db
-      .prepare(
-        `SELECT r.run_id, r.data_cutoff_utc, r.config_json, r.ensemble_json, a.activated_at
-         FROM active_run a JOIN model_runs r ON r.run_id = a.run_id
-         WHERE a.id = 1`,
-      )
-      .first<{
-        run_id: string;
-        data_cutoff_utc: string | null;
-        config_json: string | null;
-        ensemble_json: string | null;
-        activated_at: string;
-      }>();
-    if (!row) return null;
-    return {
-      runId: row.run_id,
-      activatedAt: row.activated_at,
-      dataCutoffUtc: row.data_cutoff_utc,
-      configJson: row.config_json ?? "{}",
-      ensembleJson: row.ensemble_json ?? "{}",
-    };
-  };
+  const readPointer = async (): Promise<ActivePointer | null> =>
+    toPointer(await db.prepare(POINTER_SQL).first<PointerSqlRow>());
 
   const runs: RunRepository = {
     readPointer,
@@ -652,11 +666,7 @@ export function createRepositories(db: D1Database, clock: Clock = () => new Date
       // One batch = one transaction: the pointer, the day's forecasts and the "does this run have
       // any forecasts" probe all describe the same active run.
       const [pointerResult, forecastResult, countResult] = await db.batch([
-        db.prepare(
-          `SELECT r.run_id, r.data_cutoff_utc, r.config_json, r.ensemble_json, a.activated_at
-           FROM active_run a JOIN model_runs r ON r.run_id = a.run_id
-           WHERE a.id = 1`,
-        ),
+        db.prepare(POINTER_SQL),
         db
           .prepare(
             `SELECT ${FORECAST_COLUMNS} FROM fixture_forecasts
@@ -669,24 +679,7 @@ export function createRepositories(db: D1Database, clock: Clock = () => new Date
              WHERE run_id = (SELECT run_id FROM active_run WHERE id = 1)) AS has_any`,
         ),
       ]);
-      const row = pointerResult?.results[0] as
-        | {
-            run_id: string;
-            data_cutoff_utc: string | null;
-            config_json: string | null;
-            ensemble_json: string | null;
-            activated_at: string;
-          }
-        | undefined;
-      const pointer: ActivePointer | null = row
-        ? {
-            runId: row.run_id,
-            activatedAt: row.activated_at,
-            dataCutoffUtc: row.data_cutoff_utc,
-            configJson: row.config_json ?? "{}",
-            ensembleJson: row.ensemble_json ?? "{}",
-          }
-        : null;
+      const pointer = toPointer(pointerResult?.results[0] as PointerSqlRow | undefined);
       const rows = (forecastResult?.results ?? []) as unknown as ForecastSqlRow[];
       const hasAny = (countResult?.results[0] as { has_any: number } | undefined)?.has_any === 1;
       return { pointer, forecasts: rows.map(toForecast), runHasForecasts: hasAny };
@@ -696,10 +689,7 @@ export function createRepositories(db: D1Database, clock: Clock = () => new Date
   const predictions: PredictionRepository = {
     async insertManyIgnoreDuplicates(uploadId, runId, rows) {
       if (rows.length === 0) return 0;
-      const outcome = await db
-        .prepare(PREDICTION_INSERT)
-        .bind(predictionDocument(rows), uploadId, runId, toIso(clock()))
-        .run();
+      const outcome = await predictionStatement(uploadId, runId, rows).run();
       return outcome.meta.changes;
     },
 

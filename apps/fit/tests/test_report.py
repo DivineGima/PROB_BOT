@@ -394,3 +394,38 @@ def test_score_then_report_end_to_end() -> None:
     assert len(rows) == 1 and rows[0].rps_1x2 == pytest.approx(0.145)
     result = run_report_job(db, now=clock("2026-10-19"))
     assert result.summary["n_scored"] == 1
+
+
+def test_reuploading_an_unchanged_file_does_not_move_the_omission_rate() -> None:
+    """Review finding: omissions are stored per upload but predictions once per fixture, so the
+    rate climbed with every re-upload. Both sides are now counted per upload."""
+    db = SqliteD1()
+    seed_reference(db)
+
+    def upload(update_id: int) -> None:
+        db.conn.execute(
+            "INSERT INTO uploads (update_id, received_at, status, n_published, n_omitted) "
+            "VALUES (?, 't', 'processed', 3, 1)",
+            (update_id,),
+        )
+        upload_id = db.scalar("SELECT MAX(upload_id) FROM uploads")
+        db.conn.execute(
+            "INSERT INTO omissions (upload_id, label, reason_code) VALUES (?, 'x', 'NO_FORECAST')",
+            (upload_id,),
+        )
+
+    repo = PredictionsRepo(db)
+
+    def rate() -> float:
+        omitted = sum(repo.omission_counts().values())
+        return omitted / (repo.published_total() + omitted)
+
+    upload(1)
+    first = rate()
+    upload(2)
+    upload(3)
+    assert first == pytest.approx(0.25) and rate() == pytest.approx(0.25)
+    db.conn.execute(
+        "INSERT INTO uploads (update_id, received_at, status) VALUES (9, 't', 'rejected')"
+    )
+    assert rate() == pytest.approx(0.25)  # rejected uploads are not counted

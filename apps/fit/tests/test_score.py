@@ -72,14 +72,16 @@ def test_postponed_cancelled_suspended_awarded_are_void_under_their_own_name(sta
     assert (s.action, s.void_reason) == (VOID, status)
 
 
-def test_an_unverified_or_incomplete_finished_result_is_void() -> None:
+def test_an_unverified_or_incomplete_finished_result_waits_and_is_then_voided() -> None:
+    """The source can add the 90-minute score later, so it is not given up on at first sight."""
     for kwargs in (
         {"result_basis": "unverified"},
         {"result_basis": None},
         {"match_goals_home": None},
     ):
-        s = settle(pending(**kwargs), NOW)
-        assert (s.action, s.void_reason) == (VOID, "UNVERIFIED_RESULT"), kwargs
+        assert settle(pending(**kwargs), NOW).action == PENDING, kwargs
+        late = settle(pending(**kwargs), datetime(2026, 10, 20, 15, 0, tzinfo=UTC))
+        assert (late.action, late.void_reason) == (VOID, "UNVERIFIED_RESULT"), kwargs
 
 
 def test_an_unplayed_match_stays_pending_until_three_days_after_kickoff() -> None:
@@ -207,10 +209,23 @@ def test_a_rescheduled_match_ends_no_result_and_raises_one_alert(db: SqliteD1) -
     ]
 
 
-def test_an_unverified_result_is_void_and_never_scored(db: SqliteD1) -> None:
+def test_an_unverified_result_is_never_scored_and_is_scored_once_it_is_verified(
+    db: SqliteD1,
+) -> None:
     pred = seed_prediction(db)
     seed_match(db, basis="unverified")
     run_score_job(db, now=stamp())  # type: ignore[arg-type]
+    assert row(db, pred)["status"] == "pending"  # one day after kickoff: still waiting
+    # the source adds the 90-minute score the next night
+    db.conn.execute("UPDATE matches SET result_basis = 'regular'")
+    run_score_job(db, now=stamp("2026-10-19"))  # type: ignore[arg-type]
+    assert (row(db, pred)["status"], row(db, pred)["goals_home"]) == ("scored", 2)
+
+
+def test_an_unverified_result_that_stays_unverified_is_void_after_the_window(db: SqliteD1) -> None:
+    pred = seed_prediction(db)
+    seed_match(db, basis="unverified")
+    run_score_job(db, now=stamp("2026-10-21"))  # type: ignore[arg-type]
     assert (row(db, pred)["status"], row(db, pred)["void_reason"]) == ("void", "UNVERIFIED_RESULT")
 
 

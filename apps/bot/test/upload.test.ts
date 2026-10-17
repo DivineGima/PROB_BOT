@@ -395,6 +395,51 @@ describe("the first prediction per fixture is immutable (GR-13)", () => {
   });
 });
 
+describe("duplicates inside one file", () => {
+  it("a logged fixture listed twice is shown once and the repeat is a duplicate, even after kickoff", async () => {
+    await seedForecast({ home: 1, away: 2 });
+    await deliver(documentUpdate(1), {
+      tg: withFile(screenerFile([screenerMatch({ home: 1, away: 2 })])),
+    });
+    const twice = withFile(
+      screenerFile([
+        screenerMatch({ id: "first", home: 1, away: 2 }),
+        screenerMatch({ id: "second", home: 1, away: 2 }),
+      ]),
+    );
+    await deliver(documentUpdate(2), { tg: twice, now: new Date("2026-10-17T16:00:00Z") });
+    expect(allText(twice).match(/\[already logged\]/g)).toHaveLength(1);
+    expect(allText(twice)).toContain("DUPLICATE_PAIR");
+    expect(allText(twice)).not.toContain("STARTED");
+    expect(await count("predictions")).toBe(1);
+  });
+
+  it("a repeated match_id never collides with a real id that looks like its numbered label", async () => {
+    await seedForecast({ home: 1, away: 2 });
+    const tg = withFile(
+      screenerFile([
+        screenerMatch({ id: "X", home: 1, away: 2 }),
+        screenerMatch({ id: "X", home: 3, away: 4 }), // repeated label
+        screenerMatch({ id: "X#2", home: 5, away: 6 }), // a real id equal to the first numbered label
+      ]),
+    );
+    await deliver(documentUpdate(1), { tg });
+    const rows = await env.DB.prepare(
+      "SELECT label, reason_code FROM omissions ORDER BY label",
+    ).all<{
+      label: string;
+      reason_code: string;
+    }>();
+    expect(rows.results).toEqual([
+      { label: "X#2", reason_code: "NO_FORECAST" },
+      { label: "X#3", reason_code: "DUPLICATE_PAIR" },
+    ]);
+    const upload = await row<{ n_omitted: number; n_published: number }>("SELECT * FROM uploads");
+    expect(upload).toMatchObject({ n_omitted: 2, n_published: 1 });
+    expect(await count("omissions")).toBe(2);
+  });
+});
+
 describe("reply banners", () => {
   it("shows STALE MODELS when the active run is older than the run's own limit", async () => {
     await resetWorld();

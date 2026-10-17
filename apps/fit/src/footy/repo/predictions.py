@@ -198,6 +198,9 @@ class PredictionsRepo:
         return {str(r["reason"]): int(r["n"]) for r in rows}
 
     def published_total(self) -> int:
-        """Predictions ever logged (the denominator of the omission rate)."""
-        rows = self._db.query("SELECT COUNT(*) AS n FROM predictions")
+        """Matches published across every processed upload, counted per upload like the omissions
+        (so re-uploading an unchanged file raises both sides and the omission rate stays put)."""
+        rows = self._db.query(
+            "SELECT COALESCE(SUM(n_published), 0) AS n FROM uploads WHERE status = 'processed'"
+        )
         return int(rows[0]["n"])

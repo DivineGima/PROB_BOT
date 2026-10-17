@@ -68,13 +68,19 @@ class ForecastRepo:
         return {str(r["verdict"]): int(r["n"]) for r in rows}
 
     def prune(self, keep_runs: int) -> int:
-        """Delete the forecasts of every run outside the newest ``keep_runs`` runs (by start time).
-        The active run's forecasts are never deleted. Returns the number of rows deleted."""
+        """Delete forecasts that can no longer be served.
+
+        Kept: the active run's, and those of the newest ``keep_runs`` runs that can still be served
+        or promoted (``active``, ``superseded`` for a rollback, ``building`` awaiting a publish).
+        Runs that were rejected or failed can never be activated, and must not take a slot from a
+        rollback target. Returns the number of rows deleted."""
         results = self._db.batch(
             [
                 Statement(
                     "DELETE FROM fixture_forecasts WHERE run_id NOT IN "
-                    "(SELECT run_id FROM model_runs ORDER BY started_at DESC, run_id DESC LIMIT ?) "
+                    "(SELECT run_id FROM model_runs "
+                    "WHERE status IN ('active', 'superseded', 'building') "
+                    "ORDER BY started_at DESC, run_id DESC LIMIT ?) "
                     "AND run_id <> COALESCE((SELECT run_id FROM active_run WHERE id = 1), '')",
                     (keep_runs,),
                 ),
@@ -82,3 +88,11 @@ class ForecastRepo:
             ]
         )
         return int(results[1][0]["n"])
+
+    def future_keys(self, run_id: str, from_date: str) -> set[str]:
+        """Fixture keys the run forecast for ``from_date`` or later (any verdict)."""
+        rows = self._db.query(
+            "SELECT fixture_key FROM fixture_forecasts WHERE run_id = ? AND match_date >= ?",
+            (run_id, from_date),
+        )
+        return {str(r["fixture_key"]) for r in rows}

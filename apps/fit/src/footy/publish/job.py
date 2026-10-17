@@ -160,6 +160,13 @@ def _publish(
     n_teams = diagnostics.get("n_teams_training")
     n_forecast = diagnostics.get("n_forecast_fixtures")
     active_payloads, active_skipped = _active_payloads(registry)
+    active_id = registry.active_run_id()
+    active_keys: set[str] = set()
+    carried = 0
+    if active_id is not None and active_id != run.run_id:
+        today = run.started_at[:10]
+        active_keys = forecasts.future_keys(active_id, today)
+        carried = len(active_keys & forecasts.future_keys(run.run_id, today))
     result = evaluate_gate(
         GateInput(
             run_status=run.status,
@@ -170,6 +177,8 @@ def _publish(
             n_teams_training=int(n_teams) if isinstance(n_teams, int) else None,
             expected_forecasts=int(n_forecast) if isinstance(n_forecast, int) else None,
             forecast_rows=forecasts.count(run.run_id),
+            active_future_forecasts=len(active_keys),
+            carried_forecasts=carried,
             active_payloads=active_payloads,
             active_skipped=active_skipped,
             check_stability=not accept_drift,
