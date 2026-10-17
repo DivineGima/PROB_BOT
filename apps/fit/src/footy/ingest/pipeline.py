@@ -19,10 +19,11 @@ import logging
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 
 from footy.aliases import ReferenceData, Resolver
+from footy.clock import utc_now
 from footy.config import (
     BOOTSTRAP_SEASONS,
     COMPETITIONS,
@@ -43,6 +44,7 @@ from footy.errors import (
 )
 from footy.ingest.fd_org import FdOrgClient
 from footy.ingest.parse import ParseReport, parse_matches, parse_team_names, season_label
+from footy.jobs import JobResult
 from footy.reconcile.matches import Anomaly, MatchRow, plan_writes, to_row
 from footy.repo.d1_client import D1Error, MemoryProgress, Progress, execute_resumable
 from footy.repo.matches import MatchesRepo
@@ -53,18 +55,8 @@ from footy.repo.reference import ReferenceRepo
 log = logging.getLogger("footy.pipeline")
 
 
-def _utc_now() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def current_season_start_year(today: date) -> int:
     return today.year if today.month >= 7 else today.year - 1
-
-
-@dataclass
-class JobResult:
-    exit_code: ExitCode
-    summary: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass
@@ -282,7 +274,7 @@ def run_bootstrap(
     today: date,
     seasons: Sequence[int] | None = None,
     progress: Progress | None = None,
-    now: Callable[[], str] = _utc_now,
+    now: Callable[[], str] = utc_now,
     git_sha: str | None = None,
 ) -> JobResult:
     """Seed reference data and load history. ``db=None`` is the dry run: it fetches, parses and
@@ -380,7 +372,7 @@ def run_ingest(
     db: Database,
     today: date,
     check_team_lists: bool = True,
-    now: Callable[[], str] = _utc_now,
+    now: Callable[[], str] = utc_now,
     git_sha: str | None = None,
 ) -> JobResult:
     """Incremental window (today-7 .. today+3), reconcile, upsert, freshness, rollover check."""

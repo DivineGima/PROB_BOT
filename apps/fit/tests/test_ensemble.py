@@ -120,20 +120,39 @@ def test_other_invalid_arguments() -> None:
         equal_weights([])
 
 
-def test_prior_from_a_stored_backtest_summary() -> None:
-    summary = {
+def _summary(n: int = 500, half_life: float = 300.0, shrink: float = 4.0) -> dict[str, object]:
+    return {
         "result": {
+            "fit_config": {"half_life_days": half_life, "shrink_team": shrink},
             "models": {
-                "dc": {"overall": {"rps_1x2": 0.19}},
-                "pi": {"overall": {"rps_1x2": 0.2}},
-            }
+                "dc": {"overall": {"rps_1x2": 0.19, "n": n}},
+                "pi": {"overall": {"rps_1x2": 0.2, "n": n}},
+            },
         }
     }
-    assert prior_from_backtest(summary, ["dc", "pi"]) == {"dc": 0.19, "pi": 0.2}
-    assert prior_from_backtest(summary, ["dc", "bp"]) == {}  # one model is missing -> unusable
+
+
+def test_prior_from_a_stored_backtest_summary() -> None:
+    assert prior_from_backtest(_summary(), ["dc", "pi"]) == {"dc": 0.19, "pi": 0.2}
+    assert prior_from_backtest(_summary(), ["dc", "bp"]) == {}  # one model is missing -> unusable
     assert prior_from_backtest(None, ["dc"]) == {}
     assert prior_from_backtest({"result": "nope"}, ["dc"]) == {}
     assert prior_from_backtest({"result": {"models": {"dc": {"overall": None}}}}, ["dc"]) == {}
+
+
+def test_prior_requires_the_same_fit_settings_as_the_run_that_uses_it() -> None:
+    summary = _summary(half_life=200.0, shrink=2.0)  # e.g. the first cell of a sweep
+    assert prior_from_backtest(summary, ["dc"]) != {}  # no settings asked for: accepted
+    assert prior_from_backtest(summary, ["dc"], half_life_days=300.0, shrink_team=4.0) == {}
+    assert prior_from_backtest(summary, ["dc"], half_life_days=200.0, shrink_team=4.0) == {}
+    assert prior_from_backtest(summary, ["dc"], half_life_days=200.0, shrink_team=2.0) != {}
+    assert prior_from_backtest({"result": {"models": {}}}, ["dc"], half_life_days=300.0) == {}
+
+
+def test_prior_needs_enough_forecasts_behind_it() -> None:
+    assert prior_from_backtest(_summary(n=199), ["dc"]) == {}
+    assert prior_from_backtest(_summary(n=200), ["dc"]) != {}
+    assert prior_from_backtest(_summary(n=50), ["dc"], min_forecasts=50) != {}
 
 
 def test_as_dict_carries_the_settings_used() -> None:

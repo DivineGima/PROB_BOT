@@ -62,12 +62,21 @@ class Markets:
 
 
 MIN_RATE = 0.01
+# Floor of the bivariate Poisson covariance rate. It sits BELOW the fit's own lower bound
+# (exp(-8), about 0.0003), so a fitted covariance is never changed when a grid is built.
+MIN_COVARIANCE = 1e-4
 
 
 def clip_rate(rate: float) -> float:
     """Guard for extreme fixtures (a very strong side against a very weak one, or a rate from a
     barely identified team): keep a fitted rate inside the range the 12-goal grid supports."""
     return min(max(rate, MIN_RATE), MAX_RATE)
+
+
+def clip_covariance(rate: float) -> float:
+    """Like ``clip_rate`` for the shared bivariate Poisson term, whose legitimate values reach far
+    below the 0.01 goal-rate floor (a fitted 0.002 must stay 0.002)."""
+    return min(max(rate, MIN_COVARIANCE), MAX_RATE)
 
 
 def feasible_rho(lam_home: float, lam_away: float, rho: float) -> float:

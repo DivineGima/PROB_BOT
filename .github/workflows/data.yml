@@ -79,11 +79,14 @@ jobs:
           SHRINKS: ${{ inputs.shrinks }}
           PYTHONPATH: src
           # The legal register entry for football-data.org is signed (docs/legal/source_terms_register.md).
-          SOURCE_ENABLED_FDORG: "1"
-          FD_ORG_TOKEN: ${{ secrets.FD_ORG_TOKEN }}
+          # Least privilege: only the commands that call football-data.org get its token and the
+          # legal flag; fit, publish and backtest (numerical code) see the D1 variables only, and
+          # the dry run needs no database token.
+          SOURCE_ENABLED_FDORG: ${{ contains(fromJSON('["bootstrap-dry-run","bootstrap","ingest"]'), inputs.command) && '1' || '0' }}
+          FD_ORG_TOKEN: ${{ contains(fromJSON('["bootstrap-dry-run","bootstrap","ingest"]'), inputs.command) && secrets.FD_ORG_TOKEN || '' }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
-          CF_D1_TOKEN: ${{ secrets.CF_D1_TOKEN }}
+          CF_D1_TOKEN: ${{ inputs.command != 'bootstrap-dry-run' && secrets.CF_D1_TOKEN || '' }}
           GITHUB_SHA: ${{ github.sha }}
         run: |
           case "$COMMAND" in

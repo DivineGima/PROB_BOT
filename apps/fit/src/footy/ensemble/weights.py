@@ -120,14 +120,30 @@ def ensemble_weights(
 
 
 def prior_from_backtest(
-    summary: Mapping[str, object] | None, models: Sequence[str]
+    summary: Mapping[str, object] | None,
+    models: Sequence[str],
+    *,
+    half_life_days: float | None = None,
+    shrink_team: float | None = None,
+    min_forecasts: int = ENSEMBLE_RECENT,
 ) -> dict[str, float]:
     """Mean 1X2 RPS per model from a stored backtest summary (``job_runs.summary_json``), or an
-    empty dict when the summary is missing or does not cover every model."""
+    empty dict when the summary is missing, does not cover every model, rests on fewer than
+    ``min_forecasts`` forecasts, or was produced with different fit settings than the run that
+    would use it (``half_life_days`` and ``shrink_team``, when given)."""
     if not summary:
         return {}
     result = summary.get("result")
-    entries = result.get("models") if isinstance(result, dict) else None
+    if not isinstance(result, dict):
+        return {}
+    fit = result.get("fit_config")
+    for name, wanted in (("half_life_days", half_life_days), ("shrink_team", shrink_team)):
+        if wanted is None:
+            continue
+        have = fit.get(name) if isinstance(fit, dict) else None
+        if not isinstance(have, int | float) or not math.isclose(float(have), wanted):
+            return {}
+    entries = result.get("models")
     if not isinstance(entries, dict):
         return {}
     out: dict[str, float] = {}
@@ -135,6 +151,12 @@ def prior_from_backtest(
         entry = entries.get(m)
         overall = entry.get("overall") if isinstance(entry, dict) else None
         value = overall.get("rps_1x2") if isinstance(overall, dict) else None
-        if isinstance(value, int | float) and math.isfinite(value):
+        count = overall.get("n") if isinstance(overall, dict) else None
+        if (
+            isinstance(value, int | float)
+            and math.isfinite(value)
+            and isinstance(count, int)
+            and count >= min_forecasts
+        ):
             out[m] = float(value)
     return out if len(out) == len(models) else {}

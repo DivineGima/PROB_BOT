@@ -1,7 +1,9 @@
 """The fitters the backtest and the fit job can run, by model name (architecture section 8.2).
 
-Adding a model is additive: register its fitter in ``FITTERS`` and its payload loader in
-``load_model``.
+Adding a model takes three things: register its fitter in ``FITTERS``, its payload loader in
+``load_model``, and a migration that rebuilds ``model_params`` with the new name in its CHECK
+(SQLite cannot alter a CHECK in place, so this is not a plain additive migration; see
+architecture section 5.4).
 """
 
 from __future__ import annotations

@@ -25,12 +25,12 @@ from footy.fitting import run_fit_job
 from footy.ingest.fd_org import FdOrgClient
 from footy.ingest.pacer import Pacer
 from footy.ingest.pipeline import (
-    JobResult,
     current_season_start_year,
     default_progress_path,
     run_bootstrap,
     run_ingest,
 )
+from footy.jobs import JobResult
 from footy.models.registry import FITTERS
 from footy.models.types import MODELS
 from footy.publish.job import run_publish_job
@@ -126,6 +126,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="RUN_ID",
         help="point the active run back at a retained 'superseded' run (no gate)",
+    )
+    publish.add_argument(
+        "--accept-drift",
+        action="store_true",
+        help="with --run-id only: skip the stability guard for that run after a human decided "
+        "a large parameter move is real; other gate checks still apply; the override is logged",
     )
     return parser
 
@@ -256,6 +262,7 @@ def main(
                 database_factory(settings),
                 run_id=args.run_id,
                 rollback=args.rollback,
+                accept_drift=args.accept_drift,
                 git_sha=git_sha,
             )
         else:

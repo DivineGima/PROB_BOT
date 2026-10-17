@@ -91,10 +91,10 @@ class FitOutcome:
     fitted: GridModel | None = None
 
 
-Fitter = Callable[[], tuple[GridModel, dict[str, object]]]
+FitFunction = Callable[[], tuple[GridModel, dict[str, object]]]
 
 
-def run_fit(name: str, fitter: Fitter) -> FitOutcome:
+def run_fit(name: str, fitter: FitFunction) -> FitOutcome:
     """Run a fit; a ``ModelFitError`` (or a numerical failure) becomes a ``failed`` outcome."""
     try:
         fitted, diagnostics = fitter()

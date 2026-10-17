@@ -7,18 +7,18 @@ previous run stays active. The run is written as ``building``; ``footy publish``
 becomes active.
 
 Orchestration only: SQL is in ``footy.repo``, maths in ``footy.models``, ``footy.ensemble`` and
-``footy.form``.
+``footy.form``, the job bookkeeping in ``footy.jobs``.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from collections.abc import Callable, Sequence
-from datetime import UTC, date, datetime
+from datetime import date
 
 from footy.alerts import raise_alert
+from footy.clock import utc_now
 from footy.config import (
     DRIFT_THRESHOLD_GOALS,
     ENSEMBLE_KAPPA,
@@ -31,14 +31,15 @@ from footy.config import (
     STALE_HOURS,
 )
 from footy.ensemble.weights import ensemble_weights, prior_from_backtest
-from footy.errors import DataError, ExitCode, FootyError
+from footy.errors import DataError, ExitCode
 from footy.form.snapshot import build_team_form
-from footy.ingest.pipeline import JobResult
+from footy.jobs import JobResult, run_job
 from footy.models.pi_rating import PiParams
 from footy.models.registry import fit_model, fitters_for
 from footy.models.structure import window_matches
 from footy.models.types import MODELS, FitConfig, FitOutcome
-from footy.repo.d1_client import D1Error, MemoryProgress
+from footy.payload import payload_sha256, payload_text
+from footy.repo.d1_client import MemoryProgress
 from footy.repo.matches import MatchesRepo
 from footy.repo.models import STATUS_BUILDING, STATUS_FAILED, ModelRegistryRepo, ParamRow, RunRecord
 from footy.repo.ops import OpsRepo
@@ -51,22 +52,9 @@ log = logging.getLogger("footy.fit")
 CODE_VERSION = "stage-4"
 
 
-def _utc_now() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def run_id_for(at: str) -> str:
     """``R`` + UTC timestamp, e.g. ``R20261016T011742Z`` (section 5.4)."""
     return "R" + at.replace("-", "").replace(":", "")
-
-
-def payload_text(payload: dict[str, object]) -> str:
-    """The exact text stored in ``model_params.payload_json`` (the hash is taken over it)."""
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
-
-
-def payload_sha256(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _param_row(outcome: FitOutcome) -> ParamRow:
@@ -116,18 +104,15 @@ def run_fit_job(
     models: Sequence[str] = MODELS,
     as_of: date | None = None,
     config: FitConfig | None = None,
-    now: Callable[[], str] = _utc_now,
+    now: Callable[[], str] = utc_now,
     git_sha: str | None = None,
 ) -> JobResult:
     cfg = config or FitConfig()
     ops = OpsRepo(db)
     started = now()
     summary: dict[str, object] = {"mode": "fit"}
-    try:
-        job_id = ops.start_job("fit", started, git_sha)
-    except D1Error as exc:
-        return JobResult(ExitCode.UNEXPECTED, {**summary, "error": str(exc)})
-    try:
+
+    def body() -> ExitCode:
         try:
             fitters_for(models)  # fail early on an unknown model name
         except ValueError as exc:
@@ -136,12 +121,14 @@ def run_fit_job(
         every = training.finished_matches()
         if not every:
             raise DataError("no verified results in the database: run `footy bootstrap` first")
-        cutoff = max(m.match_date for m in every)
-        day = as_of if as_of is not None else cutoff
+        newest = max(m.match_date for m in every)
+        day = as_of if as_of is not None else newest
         matches = [m for m in every if m.match_date <= day]
         window = window_matches(matches, day, cfg.window_days)
         if len(window) < cfg.min_matches:
             raise DataError(f"only {len(window)} results in the training window")
+        # The latest result actually used: with --as-of this is earlier than the newest stored one.
+        cutoff = max(m.match_date for m in window)
         leagues = training.league_groups()
         active_ids = training.active_team_ids()
 
@@ -155,7 +142,16 @@ def run_fit_job(
         if registry.get_run(run_id) is not None:
             raise DataError(f"run {run_id} already exists: wait a second and run again")
 
-        prior = prior_from_backtest(ops.latest_job_summary("backtest"), ok) if ok else {}
+        prior = (
+            prior_from_backtest(
+                ops.latest_job_summary("backtest"),
+                ok,
+                half_life_days=cfg.half_life_days,
+                shrink_team=cfg.shrink_team,
+            )
+            if ok
+            else {}
+        )
         weights = ensemble_weights(ok, prior_rps=prior) if ok else None
         forms = build_team_form(matches, active_ids, day, cfg.window_days) if ok else []
         diagnostics: dict[str, object] = {
@@ -175,7 +171,7 @@ def run_fit_job(
             finished_at=None if ok else now(),
             data_cutoff_utc=cutoff.isoformat(),
             training_from=min(m.match_date for m in window).isoformat(),
-            training_to=max(m.match_date for m in window).isoformat(),
+            training_to=cutoff.isoformat(),
             git_sha=git_sha,
             code_version=CODE_VERSION,
             config_json=json.dumps(run_config(cfg, models, baseline), sort_keys=True),
@@ -201,6 +197,7 @@ def run_fit_job(
                 "run_id": run_id,
                 "run_status": record.status,
                 "data_cutoff": cutoff.isoformat(),
+                "newest_stored_result": newest.isoformat(),
                 "as_of": day.isoformat(),
                 "models_ok": ok,
                 "models_failed": {o.model: o.error for o in failed},
@@ -209,14 +206,6 @@ def run_fit_job(
                 "matches_in_window": len(window),
             }
         )
-    except (FootyError, D1Error) as exc:
-        try:
-            ops.finish_job(job_id, now(), "failed", summary, error=str(exc))
-        except D1Error:
-            log.warning("could not record the failed job in the database")
-        code = exc.exit_code if isinstance(exc, FootyError) else ExitCode.UNEXPECTED
-        return JobResult(code, {**summary, "error": str(exc)})
+        return ExitCode.OK if not failed else ExitCode.FIT
 
-    code = ExitCode.OK if not failed else ExitCode.FIT
-    ops.finish_job(job_id, now(), "ok" if code == ExitCode.OK else "partial", summary)
-    return JobResult(code, summary)
+    return run_job(ops, "fit", now=now, git_sha=git_sha, summary=summary, body=body)

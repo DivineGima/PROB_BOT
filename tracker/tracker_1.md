@@ -402,3 +402,34 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 | Stages 1 to 4 | **complete** (review findings above are follow-ups, none blocks Stage 5) |
 | Stages 5 to 7 | not started (Stages 5 and 7 wait for the new architecture version) |
 
+---
+
+## 2026-10-17 (end of session, later) — All review findings repaired; source of truth re-aligned (Rev-4)
+
+- **Built against:** `PRD_1.md`, `system_architecture_1.md`, `system_architecture_essential_1.md` (all N=1). Branch `fix/code-review-stage-3-4`.
+- **Done: every finding of the previous entry's table, plus the duplication and the override** (Divine asked for all of them to be repaired). Tests: 410 pytest (was 389), 85 Vitest (was 81), 47 script tests; ruff, mypy strict, Biome on changed files, repo rule checks, golden check all clean. 12 hand mutations of the fixes, each caught.
+
+| # | Finding | What was done |
+|---|---|---|
+| 1 | FD token and legal flag in every `data.yml` command | Set only for `bootstrap-dry-run`, `bootstrap`, `ingest`; the dry run gets no D1 token; a test reads the workflow file and fails if `fit`, `publish`, `backtest` or `d1-probe` could receive them |
+| 2 | Ensemble prior from any backtest | `prior_from_backtest` now needs the same half-life and shrinkage as the run and at least 200 forecasts per model; the backtest reports the production-settings cell of a sweep; the summary names its models and `test_days` |
+| 3 | Covariance floored at 0.01 when served | New `clip_covariance` (floor 1e-4, below the fit bound); `bp_grid_v1.json` regenerated; the "almost no covariance" vector is now genuinely unclipped, with tests |
+| 4 | Gate skippable by omission; unverified active payloads | A run without `n_teams_training` is rejected; the stability guard compares only with verified active payloads and records a skip reason otherwise |
+| 5 | Misaligned RPS histories | A match enters the ensemble history only when every fitted model forecast it (`rps_history` exposed and tested with a model that skips teams) |
+| 6 | `data_cutoff_utc` ignored `--as-of` | It is the latest result actually used; the newest stored result is reported separately |
+| 7 | Stale `running` jobs; fit speed; pi refits | `fail_stale_jobs` (60 minutes) at the start of fit, publish and backtest; log-factorial table makes bivariate Poisson about twice as fast (same objective and iterations); the pi fit is cached across sweep shrinkage values |
+| 8 | "Adding a model is additive" comment | Corrected in `models/registry.py` (architecture 5.4 was corrected earlier) |
+| 9 | Worker read whole payloads per call | `runs.readPointer()` (one small row) and `runs.readActiveVerified()` (fetch, hash and keep payloads only when the pointer changes; `clearActiveRunCache()` for tests); 4 new Vitest cases |
+| dup | Duplicated model code, clock, job boilerplate, payload hash, `Fitter` name | `models/pooled.py` (shared team table, payload, optimiser), `clock.py`, `jobs.py` (`JobResult`, `run_job`), `payload.py` (one hash used by fit and gate); `types.Fitter` renamed `FitFunction` |
+| override | Stability guard had no override | `footy publish --run-id ID --accept-drift`: skips only the stability guard for that run, needs an explicit run id, logs a `drift_accepted` event; structural checks still apply |
+
+- **Source-of-truth alignment (Rev-4, at Divine's explicit instruction):** compared the fixes with the documents. `system_architecture_1.md` corrected (sections 6.7, 7.6, 8.1, 8.2, 8.3, 8.6, 9.3, 9.4, ADR-039, Rev-4 table); `system_architecture_essential_1.md` corrected (Stage 4 steps 4 and 6); `docs/verification.md` notes the speed-up and that the recorded backtest numbers predate the fixes. **`PRD_1.md` untouched:** nothing here changes a requirement or contradicts it.
+- **For Divine:** merge the PR, then re-run `backtest` with `models=dc,pi,bp` (single half-life 300, shrinkage 4) to refresh the numbers; two rows can move slightly (the ensemble and a very small bivariate covariance) and no conclusion is expected to change. The next `fit` and `publish` pair will also exercise the stability guard for the first time against a real previous run.
+- **Still open (unchanged):** the pre-computed-grids redesign in the design chat (PRD_2, architecture_2, essentials_2; Stages 5 and 7 wait for it), the `claude.md` in-place-edit exception, the missing `SYETEM DESIGN RULES.html`, git identity, live `d1-probe`.
+
+### Module status
+| Module | Status |
+|---|---|
+| Stages 1 to 4 | **complete**; review findings repaired |
+| Stages 5 to 7 | not started (Stages 5 and 7 wait for the new architecture version) |
+
