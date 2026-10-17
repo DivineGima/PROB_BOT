@@ -20,10 +20,11 @@ from collections.abc import Callable
 
 from footy.alerts import raise_alert
 from footy.clock import utc_now
-from footy.config import RUNS_KEPT
+from footy.config import FORECAST_RUNS_KEPT, RUNS_KEPT
 from footy.errors import DataError, ExitCode
 from footy.jobs import JobResult, run_job
 from footy.publish.gate import GateInput, decode_payload, evaluate_gate
+from footy.repo.forecasts import ForecastRepo
 from footy.repo.models import (
     STATUS_ACTIVE,
     STATUS_BUILDING,
@@ -72,18 +73,22 @@ def run_publish_job(
     now: Callable[[], str] = utc_now,
     git_sha: str | None = None,
     keep: int = RUNS_KEPT,
+    forecast_keep: int = FORECAST_RUNS_KEPT,
 ) -> JobResult:
     ops = OpsRepo(db)
     registry = ModelRegistryRepo(db)
+    forecasts = ForecastRepo(db)
     summary: dict[str, object] = {"mode": "rollback" if rollback else "publish"}
 
     def body() -> ExitCode:
         if accept_drift and (run_id is None or rollback is not None):
             raise DataError("--accept-drift needs an explicit --run-id (and no --rollback)")
         if rollback is not None:
-            _rollback(registry, rollback, now(), summary)
+            _rollback(registry, forecasts, rollback, now(), summary)
             return ExitCode.OK
-        return _publish(registry, ops, run_id, accept_drift, now, summary, keep)
+        return _publish(
+            registry, forecasts, ops, run_id, accept_drift, now, summary, keep, forecast_keep
+        )
 
     return run_job(
         ops,
@@ -96,7 +101,11 @@ def run_publish_job(
 
 
 def _rollback(
-    registry: ModelRegistryRepo, target: str, at: str, summary: dict[str, object]
+    registry: ModelRegistryRepo,
+    forecasts: ForecastRepo,
+    target: str,
+    at: str,
+    summary: dict[str, object],
 ) -> None:
     run = registry.get_run(target)
     if run is None:
@@ -110,16 +119,24 @@ def _rollback(
     if not registry.promote(target, at):
         raise DataError(f"rollback to {target} did not take effect")
     summary.update({"run_id": target, "replaced": previous, "result": "rolled back"})
+    rows = forecasts.count(target)
+    summary["forecast_rows"] = rows
+    if rows == 0:
+        # The forecasts of runs outside the newest few are pruned; without them every match would
+        # be answered NO_FORECAST until the next fit and publish (section 8.6).
+        summary["warning"] = "the rolled-back run has no stored forecasts: run fit and publish"
 
 
 def _publish(
     registry: ModelRegistryRepo,
+    forecasts: ForecastRepo,
     ops: OpsRepo,
     run_id: str | None,
     accept_drift: bool,
     now: Callable[[], str],
     summary: dict[str, object],
     keep: int,
+    forecast_keep: int,
 ) -> ExitCode:
     run = registry.get_run(run_id) if run_id else registry.latest_run(STATUS_BUILDING)
     if run is None:
@@ -141,7 +158,15 @@ def _publish(
     bound = gate_config.get("stability_bound") if isinstance(gate_config, dict) else None
     attempted = config.get("models")
     n_teams = diagnostics.get("n_teams_training")
+    n_forecast = diagnostics.get("n_forecast_fixtures")
     active_payloads, active_skipped = _active_payloads(registry)
+    active_id = registry.active_run_id()
+    active_keys: set[str] = set()
+    carried = 0
+    if active_id is not None and active_id != run.run_id:
+        today = run.started_at[:10]
+        active_keys = forecasts.future_keys(active_id, today)
+        carried = len(active_keys & forecasts.future_keys(run.run_id, today))
     result = evaluate_gate(
         GateInput(
             run_status=run.status,
@@ -150,6 +175,10 @@ def _publish(
             form_rows=form_rows,
             active_teams=active_teams,
             n_teams_training=int(n_teams) if isinstance(n_teams, int) else None,
+            expected_forecasts=int(n_forecast) if isinstance(n_forecast, int) else None,
+            forecast_rows=forecasts.count(run.run_id),
+            active_future_forecasts=len(active_keys),
+            carried_forecasts=carried,
             active_payloads=active_payloads,
             active_skipped=active_skipped,
             check_stability=not accept_drift,
@@ -185,11 +214,13 @@ def _publish(
     if not registry.promote(run.run_id, now()):
         raise DataError(f"promotion of {run.run_id} did not take effect")
     pruned = registry.delete_runs(registry.prunable_run_ids(keep))
+    forecasts_pruned = forecasts.prune(forecast_keep)
     summary.update(
         {
             "result": "promoted",
             "replaced": previous,
             "pruned_runs": pruned,
+            "forecasts_pruned": forecasts_pruned,
             "run_counts": registry.run_counts(),
         }
     )

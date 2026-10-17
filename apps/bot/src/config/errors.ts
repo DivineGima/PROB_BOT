@@ -18,3 +18,18 @@ export type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
 
 export const ok = <T>(value: T): Result<T, never> => ({ ok: true, value });
 export const err = <E>(error: E): Result<never, E> => ({ ok: false, error });
+
+/** Reasons a match in a file produced no prediction (section 5.5; `NO_FORECAST` added in v2). */
+export const OMISSION_CODES = [
+  "UNMAPPED_TEAM",
+  "INSUFFICIENT_HISTORY",
+  "DRIFT",
+  "STARTED",
+  "TOO_FAR",
+  "DATE_MISMATCH",
+  "NO_MODEL",
+  "DUPLICATE_PAIR",
+  "NO_FORECAST",
+] as const;
+
+export type OmissionCode = (typeof OMISSION_CODES)[number];

@@ -7,7 +7,7 @@ Source PRD: PRD_1.md
 
 Source Architecture Version: system_architecture_1.md
 
-Revision: Rev-1, amended in place on 2026-10-16 after `/plan-eng-review`, at Divine's explicit instruction. Changed lines are tagged `[Rev-1]`. The version stays 1. Rev-2 (same day): Divine's decisions on A-1 to A-4 (tagged `[Rev-2]`). Rev-3 (2026-10-17): outcomes of the Stage 1 and Stage 2 builds (tagged `[Rev-3]`); scope is unchanged. Rev-4 (2026-10-17): outcomes of the Stage 3 and Stage 4 builds and live runs, plus a code review (tagged [Rev-4]); scope is unchanged.
+Revision: Rev-1, amended in place on 2026-10-16 after `/plan-eng-review`, at Divine's explicit instruction. Changed lines are tagged `[Rev-1]`. The version stays 1. Rev-2 (same day): Divine's decisions on A-1 to A-4 (tagged `[Rev-2]`). Rev-3 (2026-10-17): outcomes of the Stage 1 and Stage 2 builds (tagged `[Rev-3]`); scope is unchanged. Rev-4 (2026-10-17): outcomes of the Stage 3 and Stage 4 builds and live runs, plus a code review (tagged [Rev-4]); scope is unchanged. **Rev-5 (2026-10-17): Stages 5 and 7 below are SUPERSEDED by `system_architecture_essential_2.md` (version 2 of the PRD and architecture: nightly pre-computed forecasts, ADR-042) and Stage 6 is re-specified there. Stages 1 to 4 stay complete and unchanged. Only the superseded notes were added; the original text of Stages 5 to 7 is kept for the record and is no longer a build instruction.** The file's own `Source Architecture Version` line stays `system_architecture_1.md` because Stages 1 to 4 were built against it; the read order in `claude.md` therefore continues with essentials 2 for the remaining stages.
 
 ## Source Architecture Components
 References only, grouped by stage; nothing is duplicated here. All stages also obey `## Extensibility & Change-Tolerance` and `claude.md`.
@@ -99,6 +99,8 @@ Work strictly in stage order; a stage's exit criteria must be met (and a `/track
 9. **Exit criteria:** a promoted run readable from D1 through the Worker repo path; gate rejection tested; tests green; `/tracker/` entry written. **[Rev-4] Outcome: met. `RunRepository.readActive` in `apps/bot/src/repo` reads the active run in one batch with a SHA-256 check (Vitest); run `R20261016T232312Z` was promoted in production.**
 
 ### Stage 5 — The Telegram bot (upload to reply) (PRD build step 4)
+
+> **[Rev-5] SUPERSEDED.** Build Stage 5a and Stage 5b from `system_architecture_essential_2.md`. Steps 4 (TypeScript grid engine and golden-vector parity), 5 (drift in the Worker) and the model reads of step 3 are not built: the nightly job computes and stores the numbers (ADR-042).
 1. **Contract:** Zod schema v1 plus `packages/contracts/screener_v1.schema.json`; valid/invalid fixtures for every `E_SCHEMA_*` branch; business checks (kickoff date = `run_date_utc`, kickoff in (now, now+48h], ≤ 100 matches, size caps). Unknown extra keys are stripped; missing or mistyped required keys are fatal (§6.1) [Rev-1].
 2. **Intake:** insert the `uploads` row as `received` first (ADR-029) [Rev-1]; document guard → `getFile` → size-capped download → UTF-8 → JSON → Zod; error replies from the catalogue.
 3. **Repo (Worker):** one consistent read of active run, params, `team_form` for involved teams, existing predictions by `fixture_key`; one batched write of upload + predictions + omissions. Stage 5 creates `predictions` and `omissions` in its own migration (ADR-033) [Rev-1].
@@ -111,6 +113,8 @@ Work strictly in stage order; a stage's exit criteria must be met (and a `/track
 10. **Exit criteria:** end-to-end test with fake Telegram green; real upload from Divine answered correctly in the private chat; ignored-chat behaviour verified; `/tracker/` entry written.
 
 ### Stage 6 — Scoring, calibration and the weekly report (PRD build step 5)
+
+> **[Rev-5] RE-SPECIFIED** in `system_architecture_essential_2.md` against the version-2 prediction columns. Build from that file.
 1. **`footy score`:** match pending predictions to finished matches by `fixture_key` components; void postponed/cancelled/suspended/awarded/unverified; write RPS (1X2, totals) and log loss; idempotent updates (`WHERE status='pending'`). [Rev-1, ADR-028] A pending prediction with no matching finished match 3 days after kickoff becomes void `NO_RESULT` and is listed in one deduped alert.
 2. **Rolling per-model RPS** from stored per-model probabilities feeding the weights of §8.3 in the next fit.
 3. **Baseline snapshot:** league-frequency forecasts stored per run; paired comparison and bootstrap interval reported as information, not significance claims.
@@ -122,6 +126,8 @@ Work strictly in stage order; a stage's exit criteria must be met (and a `/track
 9. **Exit criteria:** predictions logged in Stage 5 are scored automatically after results arrive; weekly report delivered; whole-job test green; `/tracker/` entry written.
 
 ### Stage 7 — Alerts, watchdog, schedule and go-live gates (PRD build step 6)
+
+> **[Rev-5] SUPERSEDED** by Stage 7 of `system_architecture_essential_2.md` (same scope plus the missing-forecast watchdog and the re-measured CPU gate).
 1. **Alerts module (Python and Worker):** Telegram sender, `alert_key` dedupe over 24 h, message catalogue for every alert listed in §9.2.
 2. **`nightly.yml`:** cron `17 1 * * *` (A-3 accepted [Rev-2]), `workflow_dispatch`, concurrency group, 45-minute timeout, `if: failure()` alert step; first scheduled enablement only after a manual dispatch succeeds end to end.
 3. **Watchdog:** Worker scheduled handler every 6 h; alert if `active_run` is missing or older than 36 h, and alert when any `uploads` row is still `received` after 10 minutes (ADR-029) [Rev-1]; STALE MODELS banner in replies verified.

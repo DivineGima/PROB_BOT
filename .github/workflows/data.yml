@@ -18,6 +18,8 @@ on:
           - backtest
           - fit
           - publish
+          - score
+          - report
       seasons:
         description: "Seasons for bootstrap, newest first (1 to 10)"
         type: string
@@ -87,6 +89,9 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
           CF_D1_TOKEN: ${{ inputs.command != 'bootstrap-dry-run' && secrets.CF_D1_TOKEN || '' }}
+          # The weekly report is the only command that talks to Telegram, so only it gets the token.
+          TELEGRAM_BOT_TOKEN: ${{ inputs.command == 'report' && secrets.TELEGRAM_BOT_TOKEN || '' }}
+          TELEGRAM_CHAT_ID: ${{ inputs.command == 'report' && secrets.TELEGRAM_CHAT_ID || '' }}
           GITHUB_SHA: ${{ github.sha }}
         run: |
           case "$COMMAND" in
@@ -95,6 +100,8 @@ jobs:
             ingest)            python -m footy.cli ingest ;;
             fit)               python -m footy.cli fit ;;
             publish)           python -m footy.cli publish ;;
+            score)             python -m footy.cli score ;;
+            report)            python -m footy.cli report --send ;;
             d1-probe)          python -m footy.repo.d1_probe ;;
             backtest)          python -m footy.cli backtest --models "$MODELS" --test-days "$TEST_DAYS" --half-lives "$HALF_LIVES" --shrinks "$SHRINKS" ;;
             *) echo "unknown command" >&2; exit 64 ;;

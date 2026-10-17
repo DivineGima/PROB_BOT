@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "number",
+      "const": 1
+    },
+    "run_date_utc": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 2000
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "matches": {
+      "maxItems": 100,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "match_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "competition": {
+            "type": "string",
+            "enum": ["EPL", "LL", "BL", "SA", "L1", "UCL", "ERE", "PPL", "CHA", "SPL"]
+          },
+          "home": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "away": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "kickoff_utc": {
+            "type": "string",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:00Z$"
+          },
+          "lineup_status": {
+            "type": "string",
+            "enum": ["none", "expected", "confirmed"]
+          },
+          "absences_home": {
+            "anyOf": [
+              {
+                "maxItems": 40,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "player": {
+                      "type": "string",
+                      "maxLength": 80
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["out", "doubtful"]
+                    },
+                    "source_url": {
+                      "type": "string",
+                      "maxLength": 300,
+                      "pattern": "^https:\\/\\/[^\\s]+$"
+                    }
+                  },
+                  "required": ["player", "status", "source_url"]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "absences_away": {
+            "anyOf": [
+              {
+                "maxItems": 40,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "player": {
+                      "type": "string",
+                      "maxLength": 80
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["out", "doubtful"]
+                    },
+                    "source_url": {
+                      "type": "string",
+                      "maxLength": 300,
+                      "pattern": "^https:\\/\\/[^\\s]+$"
+                    }
+                  },
+                  "required": ["player", "status", "source_url"]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rest_days_home": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 60
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rest_days_away": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 60
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_urls": {
+            "maxItems": 20,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 300,
+              "pattern": "^https:\\/\\/[^\\s]+$"
+            }
+          }
+        },
+        "required": [
+          "match_id",
+          "competition",
+          "home",
+          "away",
+          "kickoff_utc",
+          "lineup_status",
+          "absences_home",
+          "absences_away",
+          "rest_days_home",
+          "rest_days_away",
+          "source_urls"
+        ]
+      }
+    },
+    "excluded": {
+      "maxItems": 200,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "match": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 40
+          }
+        },
+        "required": ["match", "reason"]
+      }
+    }
+  },
+  "required": ["schema_version", "run_date_utc", "notes", "matches", "excluded"]
+}

@@ -42,7 +42,7 @@ node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
 ### C3. Find your numeric Telegram id
 Open https://t.me/userinfobot and send it any message. It replies with your numeric `Id`. Your private chat id is the same number. This is both `ALLOWED_CHAT_ID` and `ALLOWED_USER_ID`.
 
-### C4. Put the four secrets into the Worker
+### C4. Put the five secrets into the Worker
 From the repo folder `apps/bot`:
 
 ```
@@ -51,7 +51,10 @@ npx wrangler secret put WEBHOOK_PATH_SECRET
 npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
 npx wrangler secret put ALLOWED_CHAT_ID
 npx wrangler secret put ALLOWED_USER_ID
+npx wrangler secret put TELEGRAM_BOT_TOKEN
 ```
+
+`TELEGRAM_BOT_TOKEN` is the bot token from C2. It is new in Stage 5b: from then on the Worker itself downloads your file and sends the reply, so it needs the token (until then only GitHub held it). Without it the Worker stays silent and records a `bot_token_missing` event.
 
 `wrangler login` opens https://dash.cloudflare.com in your browser to approve access. Each `secret put` prompts for the value (paste it there). If wrangler asks "create a new Worker with that name?", answer yes: the Worker is called `prob-bot`. Docs: https://developers.cloudflare.com/workers/configuration/secrets/
 
@@ -76,6 +79,7 @@ Open https://github.com/DivineGima/PROB_BOT/settings/secrets/actions and click *
 | `CF_DEPLOY_TOKEN` | the deploy token from C5 |
 | `CF_D1_TOKEN` | the nightly token from C5 |
 | `TELEGRAM_BOT_TOKEN` | the bot token from C2 |
+| `TELEGRAM_CHAT_ID` | your numeric chat id from C3 (new in Stage 6: the weekly report is sent to it) |
 | `WEBHOOK_PATH_SECRET` | the path secret from C1 (same value as in C4) |
 | `TELEGRAM_WEBHOOK_SECRET` | the header secret from C1 (same value as in C4) |
 
@@ -115,6 +119,19 @@ Same page as C11, commands in this order (after `ingest` has run at least once):
 3. `publish`: runs the promotion gate and, if it passes, makes the run active. A rejected run leaves the previous run active and writes an `alert` event.
 
 Rollback to the previous good run (a shell with the D1 token): `python -m footy.cli publish --rollback R<id>`. Look up ids in `model_runs` (status `superseded`).
+
+### C13. Going live with the Telegram bot and the weekly report (Stages 5 and 6)
+Do these in order. Nothing here needs you to paste a secret anywhere except step 2.
+1. Merge the Stage 5 and 6 pull request. `deploy.yml` applies migrations `0004` (forecasts), `0005` (predictions, omissions) and `0006` (calibration snapshots) to the real D1, then deploys the Worker.
+2. Add the Worker secret `TELEGRAM_BOT_TOKEN` (C4) and the GitHub secret `TELEGRAM_CHAT_ID` (C6).
+3. Run the `data` workflow with `fit`, then `publish`. The active run from before this change has **no forecasts**, so until this step every match would be answered `NO_FORECAST`. After it, the new run carries a forecast for every scheduled fixture of the next five days.
+4. Check that the forecasts exist: the `fit` log shows `"forecasts": N` and `"forecast_verdicts"`. N should be roughly the number of fixtures in the next five days across the nine competitions.
+5. The next morning, after the nightly data is in, upload the screener file as usual. Expected: a reply within seconds with probabilities, an `Omitted:` list if any, and a footer. Tell Claude Code what you saw; it then reads the Worker CPU from Workers Logs and records p95 in `docs/verification.md` section 7 (the Stage 5 CPU gate).
+6. After the matches are played and `ingest` has run, run `score`. Your predictions turn from `pending` to `scored`.
+7. Run `report` once to see the weekly report and chart in Telegram. It is sent every Monday once `nightly.yml` exists (Stage 7); until then run it by hand.
+8. `backtest.yml` runs on the 1st of each month by itself (and on demand). A red run means a model got worse than the previous month by more than 0.003 RPS: read the log, it is information, not a failure of the system.
+
+If a match you expected is missing from a reply, the footer says why (`NO_FORECAST`: the nightly job did not know the fixture; run `ingest`, `fit`, `publish`).
 
 ## D. Branch controls
 

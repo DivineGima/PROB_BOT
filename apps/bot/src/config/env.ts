@@ -9,6 +9,8 @@ export interface Env {
   WEBHOOK_PATH_SECRET: string;
   ALLOWED_CHAT_ID: string;
   ALLOWED_USER_ID: string;
+  /** Bot API token (Worker secret). Read ONLY by the `telegram` module; a missing token fails safe. */
+  TELEGRAM_BOT_TOKEN?: string;
   /** "1" enables the Stage 1 CPU spike path; anything else (or unset) keeps it off. */
   SPIKE_ENABLED?: string;
 }

@@ -43,6 +43,7 @@ def gate(**overrides: object) -> GateInput:
         "form_rows": 20,
         "active_teams": 20,
         "n_teams_training": 20,
+        "expected_forecasts": 0,
     }
     base.update(overrides)
     return GateInput(**base)  # type: ignore[arg-type]
@@ -171,3 +172,18 @@ def test_all_reasons_are_reported_together() -> None:
     )
     assert len(result.reasons) >= 3
     assert result.as_dict()["passed"] is False
+
+
+def test_the_forecast_carry_over_needs_half_of_the_active_runs_upcoming_fixtures() -> None:
+    assert evaluate_gate(gate(active_future_forecasts=10, carried_forecasts=5)).passed
+    short = evaluate_gate(gate(active_future_forecasts=10, carried_forecasts=4))
+    assert not short.passed and "only 4 of the 10 upcoming fixtures" in short.reasons[0]
+    assert short.checks["forecast_carryover"] == {"active_upcoming": 10, "carried": 4, "needed": 5}
+    assert evaluate_gate(gate(active_future_forecasts=3, carried_forecasts=1)).passed is False
+    assert evaluate_gate(gate(active_future_forecasts=3, carried_forecasts=2)).passed
+
+
+def test_the_carry_over_is_not_checked_without_an_active_run_or_with_the_override() -> None:
+    assert evaluate_gate(gate(active_future_forecasts=0, carried_forecasts=0)).passed
+    skipped = gate(active_future_forecasts=10, carried_forecasts=0, check_stability=False)
+    assert evaluate_gate(skipped).passed

@@ -58,10 +58,19 @@ STALE_HOURS = 36  # STALE MODELS banner age (ADR-015)
 STABILITY_BOUND = 0.5  # promotion gate: largest allowed move of a team value versus the active run
 GATE_FORM_COVERAGE = 0.95  # team_form must cover this share of active teams
 GATE_PAYLOAD_COVERAGE = 0.95  # a payload must cover this share of teams with training matches
+GATE_FORECAST_CARRYOVER = (
+    0.5  # a new run must forecast this share of the active run's upcoming fixtures
+)
 ENSEMBLE_KAPPA = 100.0  # softmax sharpness on mean RPS (RPS differences between models are tiny)
 ENSEMBLE_RECENT = 200  # most recent scored predictions used for the rolling RPS
 ENSEMBLE_SHRINK_N = 50  # pseudo-count of the prior in the weight shrinkage
 RUNS_KEPT = 30  # retained model runs (ADR-004)
+FORECAST_HORIZON_DAYS = 4  # forecast fixtures from today to today + this many days (ADR-042)
+FORECAST_RUNS_KEPT = 5  # runs whose forecasts are kept; a rollback needs them (section 8.11)
+DRIFT_TOLERANCE = 1e-9  # a goal difference of exactly the threshold passes
+BACKTEST_REGRESSION_TOLERANCE = 0.003  # RPS rise versus the previous comparable backtest (ADR-046)
+REPORT_TARGET_SCORED = 300  # PRD success metric: at least this many scored predictions
+NO_RESULT_DAYS = 3  # a pending prediction with no result this long after kickoff is void (ADR-028)
 
 
 @dataclass(frozen=True)
@@ -71,6 +80,22 @@ class Settings:
     cf_account_id: str = ""
     d1_database_id: str = ""
     cf_d1_token: str = field(default="", repr=False)
+    telegram_bot_token: str = field(default="", repr=False)
+    telegram_chat_id: str = field(default="", repr=False)
+
+    def require_telegram(self) -> tuple[str, str]:
+        """The weekly report's destination; refuse rather than guess when either is missing."""
+        missing = [
+            name
+            for name, value in (
+                ("TELEGRAM_BOT_TOKEN", self.telegram_bot_token),
+                ("TELEGRAM_CHAT_ID", self.telegram_chat_id),
+            )
+            if not value
+        ]
+        if missing:
+            raise ConfigError(f"missing environment variable(s): {', '.join(missing)}")
+        return self.telegram_bot_token, self.telegram_chat_id
 
     def require_fd_org(self) -> str:
         """The legal gate (CLAUDE.md section 4): refuse unless the flag is on and a token exists."""
@@ -106,4 +131,6 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         cf_account_id=source.get("CF_ACCOUNT_ID", "").strip(),
         d1_database_id=source.get("D1_DATABASE_ID", "").strip(),
         cf_d1_token=source.get("CF_D1_TOKEN", "").strip(),
+        telegram_bot_token=source.get("TELEGRAM_BOT_TOKEN", "").strip(),
+        telegram_chat_id=source.get("TELEGRAM_CHAT_ID", "").strip(),
     )

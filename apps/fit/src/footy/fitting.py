@@ -1,10 +1,12 @@
 """``footy fit``: fit the three models, weight the ensemble, snapshot team form, write the run.
 
-Section 7.9 steps "fit dc / pi / bp, weights, baselines, team_form" and 8.2 failure semantics:
+Section 7.9 steps "fit dc / pi / bp, weights, baselines, team_form, forecasts" and 8.2 failure
+semantics:
 a model that fails convergence or sanity checks is stored ``failed`` with its reason and is never
 replaced by yesterday's parameters; a run where every model failed is stored ``failed`` and the
 previous run stays active. The run is written as ``building``; ``footy publish`` decides whether it
-becomes active.
+becomes active. Version 2 (ADR-042): the same job computes and stores the forecast of every
+scheduled fixture in the next few days, so the Worker only has to look them up.
 
 Orchestration only: SQL is in ``footy.repo``, maths in ``footy.models``, ``footy.ensemble`` and
 ``footy.form``, the job bookkeeping in ``footy.jobs``.
@@ -14,8 +16,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import Counter
 from collections.abc import Callable, Sequence
-from datetime import date
+from datetime import date, timedelta
 
 from footy.alerts import raise_alert
 from footy.clock import utc_now
@@ -24,14 +27,17 @@ from footy.config import (
     ENSEMBLE_KAPPA,
     ENSEMBLE_RECENT,
     ENSEMBLE_SHRINK_N,
+    FORECAST_HORIZON_DAYS,
     GATE_FORM_COVERAGE,
     GATE_PAYLOAD_COVERAGE,
     MIN_TEAM_MATCHES,
     STABILITY_BOUND,
     STALE_HOURS,
 )
+from footy.ensemble.history import model_rps_series
 from footy.ensemble.weights import ensemble_weights, prior_from_backtest
 from footy.errors import DataError, ExitCode
+from footy.forecast import build_forecasts
 from footy.form.snapshot import build_team_form
 from footy.jobs import JobResult, run_job
 from footy.models.pi_rating import PiParams
@@ -40,16 +46,21 @@ from footy.models.structure import window_matches
 from footy.models.types import MODELS, FitConfig, FitOutcome
 from footy.payload import payload_sha256, payload_text
 from footy.repo.d1_client import MemoryProgress
+from footy.repo.forecasts import ForecastRepo
 from footy.repo.matches import MatchesRepo
 from footy.repo.models import STATUS_BUILDING, STATUS_FAILED, ModelRegistryRepo, ParamRow, RunRecord
 from footy.repo.ops import OpsRepo
 from footy.repo.ports import Database
+from footy.repo.predictions import PredictionsRepo
 from footy.repo.training import TrainingRepo
 from footy.scoring import FrequencyBaseline
 
 log = logging.getLogger("footy.fit")
 
-CODE_VERSION = "stage-4"
+CODE_VERSION = "stage-6"
+# Fetch more scored predictions than the window needs, because only those every fitted model
+# forecast count (the alignment rule of footy.ensemble.history).
+HISTORY_FETCH_FACTOR = 3
 
 
 def run_id_for(at: str) -> str:
@@ -95,6 +106,7 @@ def run_config(
             "shrink_n": ENSEMBLE_SHRINK_N,
         },
         "baseline": baseline.snapshot(),
+        "forecast": {"horizon_days": FORECAST_HORIZON_DAYS, "basis": "matches SCHEDULED or TIMED"},
     }
 
 
@@ -152,8 +164,36 @@ def run_fit_job(
             if ok
             else {}
         )
-        weights = ensemble_weights(ok, prior_rps=prior) if ok else None
+        # Rolling weights (ADR-046): the per-model RPS of the newest scored predictions that every
+        # fitted model forecast; with none yet the backtest prior (or equal weights) decides.
+        history = (
+            model_rps_series(
+                PredictionsRepo(db).recent_scored(ENSEMBLE_RECENT * HISTORY_FETCH_FACTOR), ok
+            )
+            if ok
+            else {}
+        )
+        weights = ensemble_weights(ok, history=history, prior_rps=prior) if ok else None
         forms = build_team_form(matches, active_ids, day, cfg.window_days) if ok else []
+        today = date.fromisoformat(started[:10])
+        fixtures = (
+            ForecastRepo(db).upcoming_fixtures(today, today + timedelta(days=FORECAST_HORIZON_DAYS))
+            if ok and weights is not None
+            else []
+        )
+        fitted_models = {o.model: o.fitted for o in outcomes if o.status == "ok" and o.fitted}
+        forecasts = (
+            build_forecasts(
+                fixtures,
+                {f.team_id: f for f in forms},
+                fitted_models,
+                weights.weights,
+                baseline,
+                started,
+            )
+            if ok and weights is not None
+            else []
+        )
         diagnostics: dict[str, object] = {
             "models": {
                 o.model: {"status": o.status, "error": o.error, "diagnostics": o.diagnostics}
@@ -164,6 +204,9 @@ def run_fit_job(
             "freshness": MatchesRepo(db).freshness(),
             "failed_models": [o.model for o in failed],
         }
+        if ok:
+            diagnostics["n_forecast_fixtures"] = len(forecasts)
+            diagnostics["forecast_verdicts"] = dict(Counter(f.verdict for f in forecasts))
         record = RunRecord(
             run_id=run_id,
             status=STATUS_BUILDING if ok else STATUS_FAILED,
@@ -179,6 +222,8 @@ def run_fit_job(
             diagnostics_json=json.dumps(diagnostics, sort_keys=True, default=str),
         )
         registry.write_run(record, [_param_row(o) for o in outcomes], forms, MemoryProgress())
+        if forecasts:
+            ForecastRepo(db).write(run_id, forecasts, MemoryProgress())
 
         for o in failed:
             raise_alert(
@@ -203,6 +248,8 @@ def run_fit_job(
                 "models_failed": {o.model: o.error for o in failed},
                 "ensemble": weights.as_dict() if weights else None,
                 "team_form_rows": len(forms),
+                "forecasts": len(forecasts),
+                "forecast_verdicts": dict(Counter(f.verdict for f in forecasts)),
                 "matches_in_window": len(window),
             }
         )

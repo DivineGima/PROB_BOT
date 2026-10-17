@@ -5,14 +5,30 @@ import { ERROR_CODES } from "./config/errors";
 import { logRequest } from "./config/log";
 import { createRepositories } from "./repo";
 import { handleSpike } from "./spike";
-import { classifyUpdate } from "./telegram/update";
+import { type Sleep, telegramFromEnv } from "./telegram/client";
+import { classifyUpdate, extractDocument } from "./telegram/update";
+import { handleDocument, sendUsageHint, type UploadOutcome } from "./upload";
 
 /**
  * Entry point: routing only. Flow (sections 6.2, 7.8):
  *   path/method/header (auth.verifyWebhook) -> body guard -> allowlist (auth.checkSession)
- *   -> update_id dedupe (repo) -> 200.
- * Stage 1 acknowledges; intake, engine and reply arrive in Stage 5 behind the same 200.
+ *   -> update_id dedupe (repo) -> 200, then the upload pipeline (or the usage hint) runs after
+ *   the acknowledgement in `ctx.waitUntil` (Stage 5b, ADR-042).
  */
+
+/** What the Worker needs from the outside world; tests inject fakes, production uses the defaults. */
+export interface Services {
+  fetch: typeof fetch;
+  now: () => Date;
+  newErrorId: () => string;
+  sleep?: Sleep;
+}
+
+const defaultServices: Services = {
+  fetch: (input, init) => fetch(input, init),
+  now: () => new Date(),
+  newErrorId: () => crypto.randomUUID().slice(0, 8),
+};
 
 const empty = (status: number): Response => new Response(null, { status });
 
@@ -48,6 +64,7 @@ async function handleTelegramUpdate(
   env: Env,
   ctx: ExecutionContext,
   requestId: string,
+  services: Services,
 ): Promise<Response> {
   let update: unknown;
   try {
@@ -62,7 +79,7 @@ async function handleTelegramUpdate(
     return empty(200);
   }
 
-  const repos = createRepositories(env.DB);
+  const repos = createRepositories(env.DB, services.now);
 
   const session = checkSession(update, env);
   if (!session) {
@@ -90,6 +107,9 @@ async function handleTelegramUpdate(
       outcome: firstTime ? "acknowledged" : "replay",
       update_id: session.updateId,
     });
+    if (firstTime) {
+      ctx.waitUntil(runPipeline(update, session, repos, env, requestId, services));
+    }
     return empty(200);
   } catch {
     // Not yet acknowledged: a non-200 makes Telegram retry later, which is safe because nothing ran.
@@ -104,10 +124,47 @@ async function handleTelegramUpdate(
   }
 }
 
+/** The work behind the acknowledgement: a document runs the upload pipeline, anything else gets the hint. */
+async function runPipeline(
+  update: unknown,
+  session: { updateId: number; chatId: number },
+  repos: ReturnType<typeof createRepositories>,
+  env: Env,
+  requestId: string,
+  services: Services,
+): Promise<void> {
+  const started = Date.now();
+  let outcome: UploadOutcome;
+  try {
+    const deps = {
+      repos,
+      telegram: telegramFromEnv(env, services.fetch, services.sleep),
+      now: services.now,
+      newErrorId: services.newErrorId,
+    };
+    const document = classifyUpdate(update) === "document" ? extractDocument(update) : null;
+    outcome = document
+      ? await handleDocument(deps, { updateId: session.updateId, chatId: session.chatId, document })
+      : await sendUsageHint(deps, session.chatId);
+  } catch {
+    outcome = { outcome: "pipeline_crashed", errorCode: ERROR_CODES.E_INTERNAL };
+  }
+  logRequest({
+    request_id: requestId,
+    route: "webhook",
+    outcome: outcome.outcome,
+    update_id: session.updateId,
+    ...(outcome.errorCode ? { error_code: outcome.errorCode } : {}),
+    duration_ms: Date.now() - started,
+    ...outcome.counts,
+  });
+}
+
 export async function handleFetch(
   request: Request,
   env: Env,
   ctx: ExecutionContext,
+  services: Services = defaultServices,
 ): Promise<Response> {
   const requestId = crypto.randomUUID();
   const route = routeOf(new URL(request.url).pathname);
@@ -128,7 +185,7 @@ export async function handleFetch(
   }
 
   if (route === "spike") return handleSpike(request);
-  return handleTelegramUpdate(request, env, ctx, requestId);
+  return handleTelegramUpdate(request, env, ctx, requestId, services);
 }
 
 export default {

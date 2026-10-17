@@ -1,6 +1,6 @@
 """``footy`` command line (architecture section 6.7). Stage 2 provides ``bootstrap`` and ``ingest``,
-Stage 3 adds ``backtest``, Stage 4 adds ``fit`` and ``publish``; the other commands in the table
-arrive with their stages.
+Stage 3 adds ``backtest``, Stage 4 adds ``fit`` and ``publish``, Stage 6 adds ``score`` and
+``report``; the other commands in the table arrive with their stages.
 
 Exit codes: 0 ok, 1 unexpected, 2 data/validation failure, 3 source outage, 4 fit failure.
 The summary printed on stdout never contains tokens or raw source payloads.
@@ -19,7 +19,12 @@ from pathlib import Path
 
 from footy.aliases import load_reference
 from footy.backtest.job import DEFAULT_FOLD_DAYS, DEFAULT_TEST_DAYS, run_backtest_job
-from footy.config import MIN_REQUEST_INTERVAL_S, Settings, load_settings
+from footy.config import (
+    BACKTEST_REGRESSION_TOLERANCE,
+    MIN_REQUEST_INTERVAL_S,
+    Settings,
+    load_settings,
+)
 from footy.errors import ConfigError, ExitCode, FootyError
 from footy.fitting import run_fit_job
 from footy.ingest.fd_org import FdOrgClient
@@ -36,9 +41,17 @@ from footy.models.types import MODELS
 from footy.publish.job import run_publish_job
 from footy.repo.d1_client import D1Client, D1Error, JsonFileProgress, MemoryProgress, Progress
 from footy.repo.ports import Database
+from footy.report.job import run_report_job
+from footy.score.job import run_score_job
+from footy.telegram import TelegramSender
 
 ClientFactory = Callable[[str], FdOrgClient]
 DatabaseFactory = Callable[[Settings], Database]
+SenderFactory = Callable[[str, str], TelegramSender]
+
+
+def _default_sender(token: str, chat_id: str) -> TelegramSender:
+    return TelegramSender(token, chat_id)
 
 
 def _default_client(token: str) -> FdOrgClient:
@@ -102,6 +115,18 @@ def build_parser() -> argparse.ArgumentParser:
     back.add_argument(
         "--out", type=Path, default=None, help="also write the text report to this file"
     )
+    back.add_argument(
+        "--fail-on-regression",
+        action="store_true",
+        help="exit 4 when a model's RPS is worse than in the previous comparable backtest by more "
+        "than the tolerance (informational: it never blocks a deploy)",
+    )
+    back.add_argument(
+        "--regression-tolerance",
+        type=float,
+        default=BACKTEST_REGRESSION_TOLERANCE,
+        help="largest tolerated RPS rise versus the previous comparable backtest",
+    )
 
     fit = sub.add_parser(
         "fit",
@@ -113,6 +138,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=date.fromisoformat,
         default=None,
         help="YYYY-MM-DD; window and time decay end here (default: the latest stored result)",
+    )
+
+    sub.add_parser("score", help="settle pending predictions against stored results")
+
+    report = sub.add_parser(
+        "report", help="weekly calibration summary; stores a snapshot and can send it to Telegram"
+    )
+    report.add_argument(
+        "--send", action="store_true", help="send the text and chart to Telegram (needs the token)"
+    )
+    report.add_argument(
+        "--monday-only", action="store_true", help="do nothing unless today (UTC) is a Monday"
     )
 
     publish = sub.add_parser(
@@ -182,6 +219,8 @@ def _run_backtest(
         shrinks=shrinks,
         git_sha=git_sha,
         report_sink=sink,
+        fail_on_regression=bool(args.fail_on_regression),
+        regression_tolerance=float(args.regression_tolerance),
     )
 
 
@@ -235,6 +274,7 @@ def main(
     env: Mapping[str, str] | None = None,
     client_factory: ClientFactory = _default_client,
     database_factory: DatabaseFactory = _default_database,
+    sender_factory: SenderFactory = _default_sender,
     today: date | None = None,
 ) -> int:
     logging.basicConfig(
@@ -253,6 +293,20 @@ def main(
                 database_factory(settings),
                 models=_models_arg(args.models),
                 as_of=args.as_of,
+                git_sha=git_sha,
+            )
+        elif args.command == "score":
+            result = run_score_job(database_factory(settings), git_sha=git_sha)
+        elif args.command == "report":
+            sender = None
+            if args.send:
+                token, chat_id = settings.require_telegram()
+                sender = sender_factory(token, chat_id)
+            result = run_report_job(
+                database_factory(settings),
+                sender=sender,
+                send=bool(args.send),
+                monday_only=bool(args.monday_only),
                 git_sha=git_sha,
             )
         elif args.command == "publish":

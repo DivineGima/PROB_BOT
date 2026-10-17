@@ -12,9 +12,12 @@ from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import date, timedelta
 
+from footy.alerts import raise_alert
+from footy.backtest.regression import compare_with_previous
 from footy.backtest.report import format_report
 from footy.backtest.walkforward import BacktestConfig, BacktestResult, run_backtest
 from footy.clock import utc_now
+from footy.config import BACKTEST_REGRESSION_TOLERANCE
 from footy.errors import DataError, ExitCode
 from footy.jobs import JobResult, run_job
 from footy.models.registry import Fitter, fitters_for
@@ -69,12 +72,18 @@ def run_backtest_job(
     now: Callable[[], str] = utc_now,
     git_sha: str | None = None,
     report_sink: Callable[[str], None] | None = None,
+    fail_on_regression: bool = False,
+    regression_tolerance: float = BACKTEST_REGRESSION_TOLERANCE,
 ) -> JobResult:
     """Walk-forward backtest over the last ``test_days`` days of stored results. With several
     ``half_lives`` or ``shrinks`` every combination appears in the sweep table (starting values are
     chosen from it by hand, never auto-applied). The reported result, which the fit job may read
     as its ensemble prior, is the combination equal to the production defaults when the sweep
-    contains it, otherwise the first one; the summary names the settings and models it used."""
+    contains it, otherwise the first one; the summary names the settings and models it used.
+
+    The result is also compared with the previous comparable backtest (ADR-046). A model that got
+    worse by more than ``regression_tolerance`` is recorded in the summary and raises an alert
+    event; with ``fail_on_regression`` the job then ends with the fit-failure exit code."""
     ops = OpsRepo(db)
     summary: dict[str, object] = {"mode": "backtest"}
 
@@ -93,6 +102,8 @@ def run_backtest_job(
         if MODEL_PI in fitters:
             fitters[MODEL_PI] = _memoised(fitters[MODEL_PI])
 
+        # Read before this job's own row can matter: it is still 'running', so it is never picked.
+        previous = ops.latest_job_summary("backtest")
         repo = TrainingRepo(db)
         matches = repo.finished_matches()
         if not matches:
@@ -140,7 +151,25 @@ def run_backtest_job(
         if reported.forecast_matches == 0:
             raise DataError("the backtest produced no forecasts (models failed or too little data)")
         failed_folds = sum(len(reported.fold_failures.get(m, [])) for m in models)
-        return ExitCode.FIT if failed_folds else ExitCode.OK
+
+        regression = compare_with_previous(
+            previous,
+            {"models": list(models), "test_days": test_days, "result": summary["result"]},
+            tolerance=regression_tolerance,
+        )
+        summary["regression"] = regression
+        regressed = regression["regressed"]
+        if regressed:
+            raise_alert(
+                ops,
+                now(),
+                f"backtest_regression:{cutoff.isoformat()}",
+                "backtest_regression",
+                {"regressed": regressed, "changes": regression.get("changes")},
+            )
+        if failed_folds or (regressed and fail_on_regression):
+            return ExitCode.FIT
+        return ExitCode.OK
 
     return run_job(ops, "backtest", now=now, git_sha=git_sha, summary=summary, body=body)
 

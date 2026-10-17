@@ -8,7 +8,7 @@ from collections.abc import Callable
 import pytest
 
 from footy.errors import ExitCode
-from footy.fitting import run_fit_job
+from footy.fitting import CODE_VERSION, run_fit_job
 from footy.models.registry import load_model
 from footy.models.types import FitConfig
 from footy.payload import payload_sha256
@@ -63,13 +63,13 @@ def fit_again(db: SqliteD1, second: int) -> str:
     return str(result.summary["run_id"])
 
 
-# -- fit ------------------------------------------------------------------------------------------
+# -- fit ----------
 
 
 def test_fit_writes_a_building_run_with_everything_the_worker_needs(fitted: SqliteD1) -> None:
     run = fitted.rows("SELECT * FROM model_runs")[0]
     assert run["run_id"] == "R20260601T011701Z" and run["status"] == "building"
-    assert run["git_sha"] == "sha-1" and run["code_version"] == "stage-4"
+    assert run["git_sha"] == "sha-1" and run["code_version"] == CODE_VERSION
     config = json.loads(run["config_json"])
     assert config["unvalidated"] is True and config["models"] == ["dc", "pi", "bp"]
     assert config["min_team_matches"] == 10 and config["drift"]["threshold_goals"] == 0.6
@@ -207,7 +207,7 @@ def test_a_database_failure_during_fit_is_reported_not_raised(world: SyntheticWo
     assert db.rows("SELECT status FROM job_runs WHERE kind = 'fit'")[0]["status"] == "failed"
 
 
-# -- publish --------------------------------------------------------------------------------------
+# -- publish ----------
 
 
 def test_publishing_the_first_run_makes_it_active(fitted: SqliteD1) -> None:
@@ -352,7 +352,7 @@ def test_the_repo_refuses_to_promote_a_run_that_is_not_promotable(fitted: Sqlite
     assert run_ids(db, "active") == ["R20260601T011701Z"]  # the active run was not superseded
 
 
-# -- rollback and pruning -------------------------------------------------------------------------
+# -- rollback and pruning ----------
 
 
 def test_rollback_points_the_active_run_back_at_a_superseded_run(fitted: SqliteD1) -> None:

@@ -18,6 +18,8 @@ export default defineConfig({
             TELEGRAM_WEBHOOK_SECRET: "test-header-secret-0123456789",
             ALLOWED_CHAT_ID: "1001",
             ALLOWED_USER_ID: "1001",
+            // A well-formed fake bot token (digits, colon, 20+ URL-safe characters).
+            TELEGRAM_BOT_TOKEN: "123456:TEST-token-abcdefghijklmnopqrstuvwx",
             SPIKE_ENABLED: "1",
           },
         },
