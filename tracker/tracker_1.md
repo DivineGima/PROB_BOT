@@ -540,3 +540,24 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 | Stage 5b | working live; CPU trim **code complete, awaiting re-measurement** |
 | Stage 6 | code complete; live checks **in-progress** |
 | Stage 7 | not started |
+
+---
+
+## 2026-10-18 (last) - CPU gate re-measured after the F1 trim; miss accepted by Divine (ADR-048); go to Stage 7
+
+- **Built against:** `PRD_2.md`, `system_architecture_2.md`, `system_architecture_essential_2.md` (all N=2). Branch `docs/cpu-gate-decision`. No code changed.
+- **Merged since the previous entries:** PR 22 (live-run record) and PR 23 (hand validator in place of Zod, ADR-047; deploy green).
+- **Re-measurement (version `2a068cd6`, 13 requests, 15- and 49-match files):** warmed (11 samples) **5 to 8 ms, median 7**; first request of a burst 17 and 14 ms; handler time 0.9 to 1.1 s. Before the trim: warmed 7 to 9 ms (median 8), first request 11 to 25 ms. The 6 ms target is **not met**; no request failed in 26 production requests, 7 of which were at or above the 10 ms Free-plan limit (all first requests after a quiet spell). Table in `docs/verification.md` section 7.
+- **Decision (Divine, asked with the risk explained):** accept the miss and proceed to Stage 7. Considered and not chosen: the paid Workers plan (a new architecture version) and more trims (about 1 ms, uncertain). Worst case if Cloudflare ever enforces the limit strictly on a cold request: a silent upload that is sent again; the insert is all-or-nothing, a repeat is reported as already logged, nothing is lost or wrong.
+- **Source of truth:** `system_architecture_2.md` corrected (ADR-048 in the index and the decision log, a note in section 8.10, risk R-P1 re-rated Medium / Low); `essentials_2.md` and `PRD_2.md` not touched (no requirement or step changed).
+- **Carried into Stage 7:** a watchdog check for an upload stuck in `received` (silent upload), for missing forecasts and for a missing bot token (a bad token gives silence; found live on 2026-10-18).
+- **Still open:** `TELEGRAM_CHAT_ID` secret; `score` and `report --send` on played matches; first scheduled `backtest.yml` run; what to do with the 16 test predictions; screener exclusion names (`G1` to `G6`); the `claude.md` in-place-edit wording; the missing `SYETEM DESIGN RULES.html`; git identity; live `d1-probe`; the pi-rating memoisation follow-up.
+
+### Module status
+| Module | Status |
+|---|---|
+| Stages 1 to 4 | **complete** |
+| Stage 5a | **complete** |
+| Stage 5b | **complete** (CPU target missed, accepted, ADR-048) |
+| Stage 6 | code complete; live checks (`score`, `report`) **in-progress** |
+| Stage 7: alerts, watchdog, schedule, go-live | **next** (not started) |
