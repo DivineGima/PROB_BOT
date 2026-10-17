@@ -7,7 +7,8 @@ import {
   ok,
   type Result,
 } from "../config/errors";
-import { type ScreenerMatch, type ScreenerV1, screenerV1Schema } from "./schema";
+import type { ScreenerMatch, ScreenerV1 } from "./schema";
+import { validateScreener } from "./validate";
 
 /**
  * Intake: everything between "Telegram says a document arrived" and "a validated ScreenerV1"
@@ -53,7 +54,7 @@ export function decodeUtf8(bytes: Uint8Array): Result<string, IntakeError> {
   }
 }
 
-/** Zod issues reduced to `path (code)`: never the offending value. */
+/** Validation issues reduced to `path (code)`: never the offending value. */
 function issuePaths(issues: ReadonlyArray<{ path: PropertyKey[]; code: string }>): string[] {
   const seen = new Set<string>();
   for (const issue of issues) {
@@ -64,7 +65,10 @@ function issuePaths(issues: ReadonlyArray<{ path: PropertyKey[]; code: string }>
   return [...seen];
 }
 
-/** Size cap, UTF-8, JSON, then `schema_version` (before Zod, so a v2 file says so), then Zod. */
+/**
+ * Size cap, UTF-8, JSON, then `schema_version` (before the schema, so a v2 file says so), then the
+ * hand validator (F1 trim; `schema.ts` keeps the Zod contract that a test compares it with).
+ */
 export function parseScreenerFile(bytes: Uint8Array): Result<ScreenerV1, IntakeError> {
   const text = decodeUtf8(bytes);
   if (!text.ok) return text;
@@ -81,8 +85,8 @@ export function parseScreenerFile(bytes: Uint8Array): Result<ScreenerV1, IntakeE
   const version = (json as { schema_version?: unknown }).schema_version;
   if (version !== 1) return fail(ERROR_CODES.E_SCHEMA_VERSION);
 
-  const parsed = screenerV1Schema.safeParse(json);
-  if (!parsed.success) return fail(ERROR_CODES.E_SCHEMA_INVALID, issuePaths(parsed.error.issues));
+  const parsed = validateScreener(json);
+  if (!parsed.success) return fail(ERROR_CODES.E_SCHEMA_INVALID, issuePaths(parsed.issues));
   return ok(parsed.data);
 }
 

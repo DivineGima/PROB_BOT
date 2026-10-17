@@ -519,3 +519,24 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 | Stage 5b: Telegram bot | working live; **CPU gate missed, decision pending**; reply time met |
 | Stage 6: scoring, calibration, weekly report | code complete; `score`, `report --send` and first backtest run **in-progress** (need played matches and `TELEGRAM_CHAT_ID`) |
 | Stage 7: alerts, watchdog, schedule, go-live | not started |
+
+---
+
+## 2026-10-18 (later) - F1 trim of the screener validation (CPU gate, ADR-047)
+
+- **Built against:** `PRD_2.md`, `system_architecture_2.md`, `system_architecture_essential_2.md` (all N=2). Branch `fix/worker-hand-validator`. Divine chose "trim first, then Stage 7" after the CPU miss recorded in the entry above.
+- **What changed:** the Worker no longer runs Zod. `apps/bot/src/intake/validate.ts` is a hand validator for the screener file; `intake/index.ts` calls it. `intake/schema.ts` (Zod) is unchanged and still produces the JSON Schema and the contract drift test, so the contract has one source. Zod is no longer in the Worker bundle (bundle 70 KB, no Zod code).
+- **How it is kept equal to the contract:** `test/intake-validate.test.ts` feeds the Zod schema and the hand validator 6,000 mutated files (one to three random edits of a valid file, 55 replacement values plus deletions) and requires the same verdict, the same set of `path (code)` issues and the same parsed data (unknown keys dropped); it also checks the 100-match and 200-excluded caps. Run ad hoc with three other seeds and 30,000 cases each (90,000): no difference. Two Zod quirks had to be copied (the length limits apply to a wrong-typed value that has a length; an oversize array reports only `too_big`, no element issues).
+- **Tests:** Worker 220 (was 216), script tests 50, `tsc`, Biome on the changed files, SQL-locality and secret-reader checks clean. Python untouched.
+- **Source of truth:** `system_architecture_2.md` corrected (section 6.5 interface and component, error catalogue wording, section 8.10 note, ADR-047 in the index and the decision log, as-built table); `essentials_2.md` Stage 5b steps 2 and 3 corrected. `PRD_2.md` not touched (it says files are validated before any computation, which is still true; it names Zod as a tool, which remains the contract tool).
+- **Not verified yet:** the effect on CPU. After the merge deploys, Divine repeats the uploads (15-match and 49-match files, four sends each, plus one after a quiet spell) and Claude Code records the new numbers in `docs/verification.md` section 7. If warmed p95 is still above 6 ms, escalate to Divine again (architecture section 8.10).
+- **Still open (unchanged):** `TELEGRAM_CHAT_ID` secret, `score` and `report` on played matches, first `backtest.yml` run, decision on the 16 test predictions, the `claude.md` in-place-edit wording, the missing `SYETEM DESIGN RULES.html`, git identity, live `d1-probe`, the pi-rating memoisation follow-up. Stage 7 not started.
+
+### Module status
+| Module | Status |
+|---|---|
+| Stages 1 to 4 | **complete** |
+| Stage 5a | **complete** |
+| Stage 5b | working live; CPU trim **code complete, awaiting re-measurement** |
+| Stage 6 | code complete; live checks **in-progress** |
+| Stage 7 | not started |
