@@ -493,3 +493,29 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 | Stages 1 to 4 | **complete** |
 | Stage 5a, 5b, 6 | code **complete and reviewed**; live verification **in-progress** (needs Divine) |
 | Stage 7 | not started |
+
+---
+
+## 2026-10-18 - First live run of Stages 5a, 5b and 6 (go-live checks 1 to 4); the CPU target is missed
+
+- **Built against:** `PRD_2.md`, `system_architecture_2.md`, `system_architecture_essential_2.md` (all N=2). No source file changed; this entry and `docs/verification.md` section 7 record what the live service did. Branch `docs/stage-5-6-live-verification`.
+- **Done by Divine, in order:** the deploy of PR 21 (migrations 0004 to 0006 applied, Worker deployed, webhook registered, smoke green); `wrangler secret put TELEGRAM_BOT_TOKEN`; `ingest`-fed `fit` (run 39072264066) and `publish` (run 39072948642); real uploads to the bot.
+- **What worked live:**
+  - `fit` stored **49 forecasts** (30 `ok`, 11 `DRIFT`, 8 `INSUFFICIENT_HISTORY`); `publish` **promoted** run `R20261017T214541Z` (gate passed, 49 forecast rows of 49 expected).
+  - The bot answers: a text gets the usage hint; a file with too long `notes` is rejected with `notes (too_big)` and nothing is computed; a file with no matches gets `File valid: 0 matches passed`; a file with 7 real fixtures gets 5 probability blocks and 2 omissions with the right reasons (`DRIFT`, `INSUFFICIENT_HISTORY`).
+  - **The live `INSERT ... json_each ... ON CONFLICT DO NOTHING` works:** 16 predictions logged from 3 files, all `pending`, one per fixture key; every re-upload reported all as already logged. Reply time 0.9 to 1.6 s (target 30 s).
+- **Found live, not by tests:** the first token entered was rejected by the Worker's format check, so every update ended `no_telegram_client` (no reply, no crash, as designed). Re-entering the token fixed it. The reply when the token is bad is silence; the Stage 7 watchdog should alert on a `bot_token_missing` event (the Worker already writes it for uploads, not for the usage hint). Also: the screener writes its own exclusion names (`ROTATION_RISK`, `EARLY_SEASON`), so the bot counts them as `OTHER`; it expects `G1` to `G6` codes. Both noted below.
+- **CPU target missed (check 1).** Warmed uploads of 15 and 49 matches cost **7 to 9 ms** of Worker CPU (p50 8); the first request after a quiet period cost **11 to 25 ms**; 5 of 13 requests were at or above the 10 ms Free-plan limit and none failed. The cost does not grow with the file, so it is fixed work (parse, Zod, SHA-256, the Telegram calls, D1 calls), not model arithmetic. Not measured: 60 and 100 matches (only 49 forecasts exist) and a large sample. Full table in `docs/verification.md` section 7. **Decision needed from Divine** (CLAUDE.md: escalate): F1 trim of validation (hand validator instead of Zod, then re-measure), accept as a recorded exception, or a paid plan. Nothing adopted yet.
+- **Test data in the live log:** 16 of the logged predictions came from test files Claude Code built from the stored fixtures (not screener output). They are real forecasts of real fixtures and will be scored and counted in the weekly report. Divine decides whether to keep them or to delete the 16 rows.
+- **Not yet verified:** `score` on played matches, `report --send` (needs the `TELEGRAM_CHAT_ID` GitHub secret), the first scheduled `backtest.yml` run, the first scored predictions.
+- **Source of truth:** compared after the live run; the design did not change, so `PRD_2`, `system_architecture_2` and `essentials_2` are **not touched**. If Divine picks the F1 trim or a plan change, architecture section 8.10 / ADR-013 and risk R-P1 get updated in that change.
+- **Still open (unchanged):** the `claude.md` in-place-edit wording, the missing `SYETEM DESIGN RULES.html`, git identity, live `d1-probe`, the pi-rating memoisation key follow-up. Stage 7 not started (new: a watchdog check for a missing bot token and for missing forecasts).
+
+### Module status
+| Module | Status |
+|---|---|
+| Stages 1 to 4 | **complete** |
+| Stage 5a: nightly forecasts | **complete** (live `fit` + `publish` done, 49 forecasts) |
+| Stage 5b: Telegram bot | working live; **CPU gate missed, decision pending**; reply time met |
+| Stage 6: scoring, calibration, weekly report | code complete; `score`, `report --send` and first backtest run **in-progress** (need played matches and `TELEGRAM_CHAT_ID`) |
+| Stage 7: alerts, watchdog, schedule, go-live | not started |
