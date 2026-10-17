@@ -8,7 +8,7 @@ from collections.abc import Callable
 import pytest
 
 from footy.errors import ExitCode
-from footy.fitting import run_fit_job
+from footy.fitting import CODE_VERSION, run_fit_job
 from footy.models.registry import load_model
 from footy.models.types import FitConfig
 from footy.payload import payload_sha256
@@ -69,7 +69,7 @@ def fit_again(db: SqliteD1, second: int) -> str:
 def test_fit_writes_a_building_run_with_everything_the_worker_needs(fitted: SqliteD1) -> None:
     run = fitted.rows("SELECT * FROM model_runs")[0]
     assert run["run_id"] == "R20260601T011701Z" and run["status"] == "building"
-    assert run["git_sha"] == "sha-1" and run["code_version"] == "stage-4"
+    assert run["git_sha"] == "sha-1" and run["code_version"] == CODE_VERSION
     config = json.loads(run["config_json"])
     assert config["unvalidated"] is True and config["models"] == ["dc", "pi", "bp"]
     assert config["min_team_matches"] == 10 and config["drift"]["threshold_goals"] == 0.6

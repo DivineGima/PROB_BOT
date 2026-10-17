@@ -43,6 +43,7 @@ def gate(**overrides: object) -> GateInput:
         "form_rows": 20,
         "active_teams": 20,
         "n_teams_training": 20,
+        "expected_forecasts": 0,
     }
     base.update(overrides)
     return GateInput(**base)  # type: ignore[arg-type]

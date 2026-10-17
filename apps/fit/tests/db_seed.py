@@ -44,3 +44,15 @@ def seed_world(db: SqliteD1, world: SyntheticWorld, *, active: bool = True) -> N
                 number,
             ),
         )
+
+
+def seed_scheduled(db: SqliteD1, fixtures: list[tuple[str, str, int, int]]) -> None:
+    """Insert scheduled (not yet played) matches: ``(comp_code, 'YYYY-MM-DD', home_id, away_id)``.
+    The kickoff is 15:00 UTC on that date."""
+    for number, (comp, day, home, away) in enumerate(fixtures, start=900_000):
+        db.conn.execute(
+            "INSERT INTO matches (comp_code, season, match_date, kickoff_utc, home_team_id, "
+            "away_team_id, status, fd_match_id, goals_source, updated_at) VALUES "
+            "(?, '2026-27', ?, ?, ?, ?, 'TIMED', ?, 'fd_org', '2026-06-01T00:00:00Z')",
+            (comp, day, f"{day}T15:00:00Z", home, away, number),
+        )

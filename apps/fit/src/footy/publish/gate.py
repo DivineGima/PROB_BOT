@@ -10,7 +10,11 @@ Structural checks:
    the stored hash (read back from the database, not from memory);
 5. row counts are plausible: the run recorded how many teams had training matches, and each ``ok``
    payload holds at least 95% of them. A run that did not record that number fails: the check
-   cannot be skipped by omitting it.
+   cannot be skipped by omitting it;
+6. every forecast the run recorded is stored: the run recorded how many fixtures it forecast
+   (``n_forecast_fixtures``) and at least that many ``fixture_forecasts`` rows exist (version 2,
+   ADR-042). A run that did not record the number fails, like the check above; a run with no
+   fixtures in its window records 0 and passes.
 
 Stability guard (unvalidated): versus the active run, no team's attack/defence (``dc``, ``bp``) or
 home/away rating (``pi``) moves by more than ``stability_bound``. The active run's payloads must
@@ -43,6 +47,8 @@ class GateInput:
     form_rows: int  # team_form rows of active teams
     active_teams: int
     n_teams_training: int | None  # teams with training matches, from the run's diagnostics
+    expected_forecasts: int | None = None  # fixtures forecast, from the run's diagnostics (v2)
+    forecast_rows: int = 0  # fixture_forecasts rows stored for the run (v2)
     active_payloads: Mapping[str, dict[str, object]] = field(default_factory=dict)
     active_skipped: Mapping[str, str] = field(default_factory=dict)  # model -> why not compared
     stability_bound: float = STABILITY_BOUND
@@ -107,6 +113,18 @@ def evaluate_gate(gate: GateInput) -> GateResult:
         reasons.append(
             "the run did not record how many teams had training matches "
             "(diagnostics.n_teams_training), so the payload coverage cannot be checked"
+        )
+
+    checks["forecast_rows"] = gate.forecast_rows
+    checks["forecasts_expected"] = gate.expected_forecasts
+    if gate.expected_forecasts is None:
+        reasons.append(
+            "the run did not record how many fixtures it forecast "
+            "(diagnostics.n_forecast_fixtures), so the forecasts cannot be checked"
+        )
+    elif gate.forecast_rows < gate.expected_forecasts:
+        reasons.append(
+            f"only {gate.forecast_rows} of {gate.expected_forecasts} recorded forecasts are stored"
         )
 
     payloads: dict[str, dict[str, object]] = {}

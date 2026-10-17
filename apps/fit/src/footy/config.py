@@ -62,6 +62,12 @@ ENSEMBLE_KAPPA = 100.0  # softmax sharpness on mean RPS (RPS differences between
 ENSEMBLE_RECENT = 200  # most recent scored predictions used for the rolling RPS
 ENSEMBLE_SHRINK_N = 50  # pseudo-count of the prior in the weight shrinkage
 RUNS_KEPT = 30  # retained model runs (ADR-004)
+FORECAST_HORIZON_DAYS = 4  # forecast fixtures from today to today + this many days (ADR-042)
+FORECAST_RUNS_KEPT = 5  # runs whose forecasts are kept; a rollback needs them (section 8.11)
+DRIFT_TOLERANCE = 1e-9  # a goal difference of exactly the threshold passes
+BACKTEST_REGRESSION_TOLERANCE = 0.003  # RPS rise versus the previous comparable backtest (ADR-046)
+REPORT_TARGET_SCORED = 300  # PRD success metric: at least this many scored predictions
+NO_RESULT_DAYS = 3  # a pending prediction with no result this long after kickoff is void (ADR-028)
 
 
 @dataclass(frozen=True)

@@ -274,13 +274,18 @@ class ModelRegistryRepo:
         return [str(r["run_id"]) for r in rows]
 
     def delete_runs(self, run_ids: Sequence[str]) -> int:
-        """Delete the runs and their children (children first, because of the foreign keys)."""
+        """Delete the runs and their children (children first, because of the foreign keys). Stored
+        predictions are not children: they copy what they need and keep no reference (ADR-045)."""
         deleted = 0
         for start in range(0, len(run_ids), 30):
             chunk = list(run_ids[start : start + 30])
             marks = ", ".join("?" for _ in chunk)
             self._db.batch(
                 [
+                    Statement(
+                        f"DELETE FROM fixture_forecasts WHERE run_id IN ({marks})",  # noqa: S608
+                        tuple(chunk),
+                    ),
                     Statement(f"DELETE FROM team_form WHERE run_id IN ({marks})", tuple(chunk)),  # noqa: S608
                     Statement(f"DELETE FROM model_params WHERE run_id IN ({marks})", tuple(chunk)),  # noqa: S608
                     Statement(
