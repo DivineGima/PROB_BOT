@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-from footy.fitting import payload_sha256, payload_text
+from footy.payload import payload_sha256, payload_text
 from footy.publish.gate import GateInput, evaluate_gate
 from footy.repo.models import ParamRow
 

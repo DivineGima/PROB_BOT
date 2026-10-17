@@ -20,6 +20,7 @@ from footy.config import REPO_ROOT
 from footy.models.grid import (
     Grid,
     bivariate_poisson_grid,
+    clip_covariance,
     clip_rate,
     dixon_coles_grid,
     feasible_rho,
@@ -61,7 +62,7 @@ def _pi(inputs: Inputs) -> tuple[dict[str, float], Grid]:
 def _bp(inputs: Inputs) -> tuple[dict[str, float], Grid]:
     """Bivariate Poisson as the model serves it: all three rates clipped to the supported range."""
     lam1, lam2 = clip_rate(inputs["lambda1"]), clip_rate(inputs["lambda2"])
-    lam3 = clip_rate(inputs["lambda3"])
+    lam3 = clip_covariance(inputs["lambda3"])
     return {"lambda1": lam1, "lambda2": lam2, "lambda3": lam3}, bivariate_poisson_grid(
         lam1, lam2, lam3
     )

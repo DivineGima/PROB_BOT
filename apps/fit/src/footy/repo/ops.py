@@ -20,6 +20,10 @@ def _cutoff(at: str, hours: int) -> str:
     return (datetime.strptime(at, _TS) - timedelta(hours=hours)).strftime(_TS)
 
 
+def _minutes_before(at: str, minutes: int) -> str:
+    return (datetime.strptime(at, _TS) - timedelta(minutes=minutes)).strftime(_TS)
+
+
 class OpsRepo:
     def __init__(self, db: Database) -> None:
         self._db = db
@@ -124,6 +128,23 @@ class OpsRepo:
             ]
         )
         return int(rows[1][0]["n"]) > 0
+
+    def fail_stale_jobs(self, at: str, older_than_minutes: int) -> int:
+        """Close ``running`` rows started more than ``older_than_minutes`` ago (a job killed by the
+        workflow timeout never records its end). Returns how many were closed."""
+        cutoff = _minutes_before(at, older_than_minutes)
+        results = self._db.batch(
+            [
+                Statement(
+                    "UPDATE job_runs SET status = 'failed', finished_at = ?, "
+                    "error = 'abandoned: the job never recorded its end' "
+                    "WHERE status = 'running' AND started_at < ?",
+                    (at, cutoff),
+                ),
+                Statement("SELECT changes() AS n"),
+            ]
+        )
+        return int(results[1][0]["n"])
 
     def latest_job_summary(self, kind: str) -> dict[str, object] | None:
         """The stored summary of the newest finished job of this kind (``ok`` or ``partial``)."""

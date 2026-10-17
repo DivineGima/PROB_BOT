@@ -1,12 +1,13 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createRepositories, payloadVerifies, sha256Hex } from "../src/repo";
+import { clearActiveRunCache, createRepositories, payloadVerifies, sha256Hex } from "../src/repo";
 
 let now = new Date("2026-10-16T08:00:00Z");
 const repos = () => createRepositories(env.DB, () => now);
 
 beforeEach(async () => {
   now = new Date("2026-10-16T08:00:00Z");
+  clearActiveRunCache();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM processed_updates"),
     env.DB.prepare("DELETE FROM uploads"),
@@ -291,5 +292,76 @@ describe("RunRepository.readActive (Stage 4: a promoted run is readable through 
     expect(await sha256Hex("abc")).toBe(
       "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
     );
+  });
+});
+
+describe("RunRepository.readPointer and readActiveVerified (Worker CPU and D1 budget)", () => {
+  const seed = async (runId: string, payload: string, activatedAt = "2026-10-16T01:30:00Z") => {
+    await env.DB.prepare(
+      `INSERT INTO model_runs (run_id, status, started_at, data_cutoff_utc, config_json, ensemble_json)
+       VALUES (?1, 'active', 't', '2026-10-15', '{"unvalidated":true}', '{}')`,
+    )
+      .bind(runId)
+      .run();
+    await env.DB.prepare(
+      `INSERT INTO model_params (run_id, model, status, payload_version, payload_json, payload_sha256)
+       VALUES (?1, 'dc', 'ok', 1, ?2, ?3)`,
+    )
+      .bind(runId, payload, await sha256Hex(payload))
+      .run();
+    await env.DB.prepare(
+      `INSERT INTO active_run (id, run_id, activated_at) VALUES (1, ?1, ?2)
+       ON CONFLICT (id) DO UPDATE SET run_id = excluded.run_id, activated_at = excluded.activated_at`,
+    )
+      .bind(runId, activatedAt)
+      .run();
+  };
+
+  it("reads the pointer without any payload", async () => {
+    expect(await repos().runs.readPointer()).toBeNull();
+    await seed("R1", '{"payload_version":1,"big":"payload"}');
+    const pointer = await repos().runs.readPointer();
+    expect(pointer).toEqual({
+      runId: "R1",
+      activatedAt: "2026-10-16T01:30:00Z",
+      dataCutoffUtc: "2026-10-15",
+      configJson: '{"unvalidated":true}',
+      ensembleJson: "{}",
+    });
+    expect(JSON.stringify(pointer)).not.toContain("payload");
+  });
+
+  it("verifies once and then serves the cached run while the pointer is unchanged", async () => {
+    await seed("R1", '{"payload_version":1,"v":"first"}');
+    const first = await repos().runs.readActiveVerified();
+    expect(first?.verified.dc).toBe(true);
+    // Corrupt the stored payload behind the cache: an unchanged pointer must not re-read it.
+    await env.DB.prepare("UPDATE model_params SET payload_json = 'tampered'").run();
+    const second = await repos().runs.readActiveVerified();
+    expect(second).toBe(first);
+  });
+
+  it("re-reads and re-verifies when the active run changes, including a rollback", async () => {
+    await seed("R1", '{"payload_version":1,"v":"one"}');
+    const one = await repos().runs.readActiveVerified();
+    await seed("R2", '{"payload_version":1,"v":"two"}', "2026-10-16T02:30:00Z");
+    const two = await repos().runs.readActiveVerified();
+    expect(two?.run.runId).toBe("R2");
+    expect(two?.run.params[0]?.payloadJson).toContain("two");
+    await env.DB.prepare(
+      "UPDATE active_run SET run_id = 'R1', activated_at = '2026-10-16T03:30:00Z'",
+    ).run();
+    const back = await repos().runs.readActiveVerified();
+    expect(back?.run.runId).toBe("R1");
+    expect(back).not.toBe(one);
+  });
+
+  it("reports a corrupted payload as unverified and returns null with no active run", async () => {
+    await seed("R1", '{"payload_version":1}');
+    await env.DB.prepare("UPDATE model_params SET payload_sha256 = 'wrong'").run();
+    expect((await repos().runs.readActiveVerified())?.verified.dc).toBe(false);
+    clearActiveRunCache();
+    await env.DB.prepare("DELETE FROM active_run").run();
+    expect(await repos().runs.readActiveVerified()).toBeNull();
   });
 });

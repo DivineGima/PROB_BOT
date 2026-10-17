@@ -16,11 +16,19 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import date
+from typing import Any
 
 import numpy as np
-from scipy.optimize import minimize
 
 from footy.models.grid import Grid, clip_rate, dixon_coles_grid, feasible_rho
+from footy.models.pooled import (
+    PooledStrengthModel,
+    fit_pooled,
+    read_base,
+    read_number,
+    sanity_and_diagnostics,
+    team_tables,
+)
 from footy.models.structure import Floats, Structure
 from footy.models.types import (
     MODEL_DC,
@@ -82,65 +90,23 @@ def objective(theta: Floats, s: Structure) -> tuple[float, Floats]:
     return value, grad
 
 
-class DcModel:
+class DcModel(PooledStrengthModel):
     name = MODEL_DC
 
-    def __init__(
-        self,
-        mu: float,
-        gamma: float,
-        rho: float,
-        league_att: dict[str, float],
-        league_def: dict[str, float],
-        teams: dict[int, tuple[float, float, str]],
-        half_life_days: float,
-    ) -> None:
-        self.mu, self.gamma, self.rho = mu, gamma, rho
-        self.league_att, self.league_def = league_att, league_def
-        self.teams = teams  # team_id -> (attack, defence, league), league offset included
-        self.half_life_days = half_life_days
-
-    def knows(self, team_id: int) -> bool:
-        return team_id in self.teams
-
-    def lambdas(self, home_id: int, away_id: int) -> tuple[float, float]:
-        home, away = self.teams[home_id], self.teams[away_id]
-        lam1 = float(np.exp(self.mu + self.gamma + home[0] + away[1]))
-        lam2 = float(np.exp(self.mu + away[0] + home[1]))
-        return lam1, lam2
+    def __init__(self, rho: float, **base: Any) -> None:
+        super().__init__(**base)
+        self.rho = rho
 
     def grid(self, home_id: int, away_id: int, comp_code: str) -> Grid:
         lam1, lam2 = (clip_rate(x) for x in self.lambdas(home_id, away_id))
         return dixon_coles_grid(lam1, lam2, feasible_rho(lam1, lam2, self.rho))
 
     def to_payload(self) -> dict[str, object]:
-        return {
-            "payload_version": PAYLOAD_VERSION,
-            "model": MODEL_DC,
-            "mu": self.mu,
-            "gamma": self.gamma,
-            "rho": self.rho,
-            "half_life_days": self.half_life_days,
-            "league_att": self.league_att,
-            "league_def": self.league_def,
-            "teams": {str(t): [a, d, lg] for t, (a, d, lg) in sorted(self.teams.items())},
-        }
+        return {**self.base_payload(PAYLOAD_VERSION), "rho": self.rho}
 
     @classmethod
     def from_payload(cls, payload: dict[str, object]) -> DcModel:
-        if payload.get("payload_version") != PAYLOAD_VERSION or payload.get("model") != MODEL_DC:
-            raise ValueError("not a Dixon-Coles payload this code understands")
-        teams_raw = payload["teams"]
-        assert isinstance(teams_raw, dict)  # noqa: S101 (shape was written by to_payload)
-        return cls(
-            mu=float(payload["mu"]),  # type: ignore[arg-type]
-            gamma=float(payload["gamma"]),  # type: ignore[arg-type]
-            rho=float(payload["rho"]),  # type: ignore[arg-type]
-            league_att=dict(payload["league_att"]),  # type: ignore[call-overload]
-            league_def=dict(payload["league_def"]),  # type: ignore[call-overload]
-            teams={int(t): (float(v[0]), float(v[1]), str(v[2])) for t, v in teams_raw.items()},
-            half_life_days=float(payload["half_life_days"]),  # type: ignore[arg-type]
-        )
+        return cls(rho=read_number(payload, "rho"), **read_base(payload, MODEL_DC, PAYLOAD_VERSION))
 
 
 def fit_dixon_coles(
@@ -153,36 +119,15 @@ def fit_dixon_coles(
     data is too thin, the optimiser does not converge or a sanity check fails."""
     cfg = config or FitConfig()
     s = Structure.build(matches, leagues, as_of, cfg)
-    x0 = np.append(s.initial(), 0.0)
-    bounds = [*s.bounds(), (-cfg.rho_bound, cfg.rho_bound)]
-    result = minimize(
-        objective,
-        x0,
-        args=(s,),
-        jac=True,
-        method="L-BFGS-B",
-        bounds=bounds,
-        options={"maxiter": cfg.max_iterations, "ftol": cfg.tolerance, "gtol": 1e-6},
+    base, rho, value, iterations = fit_pooled(
+        objective, s, 0.0, (-cfg.rho_bound, cfg.rho_bound), cfg
     )
-    theta = result.x
-    if not result.success:
-        raise ModelFitError(f"optimiser did not converge: {result.message}")
-    if not np.isfinite(result.fun):
-        raise ModelFitError("objective is not finite")
-
-    base, rho = theta[:-1], float(theta[-1])
-    eta1, eta2 = s.log_lambdas(base)
-    checks = s.check_strengths(base, eta1, eta2)
-    att, dfn = s.strengths(base)
-    league_att, league_def = s.league_offsets(base)
-    teams = {
-        tid: (float(att[i]), float(dfn[i]), s.leagues[int(s.team_league[i])])
-        for i, tid in enumerate(s.team_ids)
-    }
+    diagnostics = sanity_and_diagnostics(s, base, value, iterations)
+    league_att, league_def, teams = team_tables(s, base)
     model = DcModel(
+        rho=rho,
         mu=float(base[0]),
         gamma=float(base[1]),
-        rho=rho,
         league_att=league_att,
         league_def=league_def,
         teams=teams,
@@ -192,17 +137,7 @@ def fit_dixon_coles(
     typical = dixon_coles_grid(float(np.exp(base[0] + base[1])), float(np.exp(base[0])), rho)
     if abs(float(typical.sum()) - 1.0) > 1e-9:
         raise ModelFitError("the test grid does not sum to 1")
-    diagnostics: dict[str, object] = {
-        "iterations": int(result.nit),
-        "objective": float(result.fun),
-        "n_matches": len(s.x),
-        "n_teams": s.n_teams,
-        "effective_matches": float(s.w.sum()),
-        "rho": rho,
-        "home_advantage": float(base[1]),
-        **checks,
-    }
-    return model, diagnostics
+    return model, {**diagnostics, "rho": rho}
 
 
 def fit_dc_outcome(

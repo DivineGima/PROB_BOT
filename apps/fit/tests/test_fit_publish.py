@@ -8,9 +8,10 @@ from collections.abc import Callable
 import pytest
 
 from footy.errors import ExitCode
-from footy.fitting import payload_sha256, run_fit_job
+from footy.fitting import run_fit_job
 from footy.models.registry import load_model
 from footy.models.types import FitConfig
+from footy.payload import payload_sha256
 from footy.publish.job import run_publish_job
 from footy.repo.d1_client import D1TransientError
 from footy.repo.models import ModelRegistryRepo
@@ -110,11 +111,12 @@ def test_a_backtest_summary_sets_the_initial_ensemble_weights(world: SyntheticWo
     seed_world(db, world)
     summary = {
         "result": {
+            "fit_config": {"half_life_days": 300.0, "shrink_team": 4.0},  # the fit's own settings
             "models": {
-                "dc": {"overall": {"rps_1x2": 0.200}},
-                "pi": {"overall": {"rps_1x2": 0.215}},
-                "bp": {"overall": {"rps_1x2": 0.201}},
-            }
+                "dc": {"overall": {"rps_1x2": 0.200, "n": 2000}},
+                "pi": {"overall": {"rps_1x2": 0.215, "n": 2000}},
+                "bp": {"overall": {"rps_1x2": 0.201, "n": 2000}},
+            },
         }
     }
     db.conn.execute(
@@ -191,7 +193,9 @@ def test_as_of_limits_the_data_used(world: SyntheticWorld) -> None:
     result = run_fit_job(db, models=["dc"], as_of=early, now=stamp(6))
     assert result.exit_code == ExitCode.OK
     run = db.rows("SELECT * FROM model_runs")[0]
-    assert run["training_to"] <= early.isoformat() < run["data_cutoff_utc"]
+    # the cut-off is the latest result actually used, not the newest result in the database
+    assert run["data_cutoff_utc"] == run["training_to"] <= early.isoformat()
+    assert str(result.summary["newest_stored_result"]) > early.isoformat()
 
 
 def test_a_database_failure_during_fit_is_reported_not_raised(world: SyntheticWorld) -> None:

@@ -85,12 +85,43 @@ export interface ActiveRun {
   params: ModelParams[];
 }
 
+/** The small part of the active run: no model payloads. */
+export interface ActivePointer {
+  runId: string;
+  activatedAt: string;
+  dataCutoffUtc: string | null;
+  configJson: string;
+  ensembleJson: string;
+}
+
+/** The active run with the integrity result of each model payload, computed once per run. */
+export interface VerifiedActiveRun {
+  run: ActiveRun;
+  verified: Partial<Record<ModelName, boolean>>;
+}
+
 export interface RunRepository {
   /**
    * One consistent read keyed through the pointer, so a half-published run is never seen
-   * (section 8.6 step 4). Null when nothing has been published yet.
+   * (section 8.6 step 4). Null when nothing has been published yet. Reads every payload.
    */
   readActive(): Promise<ActiveRun | null>;
+  /** Only the pointer and run metadata (one small row); cheap enough for every request. */
+  readPointer(): Promise<ActivePointer | null>;
+  /**
+   * The active run with its payloads verified, kept in memory while the pointer is unchanged:
+   * each request costs one small read, and the payloads are fetched, hashed and kept only when
+   * the active run changes. Runs are immutable once active (ADR-004), so a cached run never goes
+   * stale while its `runId` and `activatedAt` are the same.
+   */
+  readActiveVerified(): Promise<VerifiedActiveRun | null>;
+}
+
+let verifiedCache: { key: string; value: VerifiedActiveRun } | null = null;
+
+/** Forget the cached run (tests, or after an explicit rollback drill). */
+export function clearActiveRunCache(): void {
+  verifiedCache = null;
 }
 
 export interface Repositories {
@@ -221,7 +252,54 @@ export function createRepositories(db: D1Database, clock: Clock = () => new Date
     },
   };
 
+  const readPointer = async (): Promise<ActivePointer | null> => {
+    const row = await db
+      .prepare(
+        `SELECT r.run_id, r.data_cutoff_utc, r.config_json, r.ensemble_json, a.activated_at
+         FROM active_run a JOIN model_runs r ON r.run_id = a.run_id
+         WHERE a.id = 1`,
+      )
+      .first<{
+        run_id: string;
+        data_cutoff_utc: string | null;
+        config_json: string | null;
+        ensemble_json: string | null;
+        activated_at: string;
+      }>();
+    if (!row) return null;
+    return {
+      runId: row.run_id,
+      activatedAt: row.activated_at,
+      dataCutoffUtc: row.data_cutoff_utc,
+      configJson: row.config_json ?? "{}",
+      ensembleJson: row.ensemble_json ?? "{}",
+    };
+  };
+
   const runs: RunRepository = {
+    readPointer,
+
+    async readActiveVerified() {
+      const pointer = await readPointer();
+      if (!pointer) {
+        verifiedCache = null;
+        return null;
+      }
+      const key = `${pointer.runId}|${pointer.activatedAt}`;
+      if (verifiedCache?.key === key) return verifiedCache.value;
+      const run = await runs.readActive();
+      if (!run) {
+        verifiedCache = null;
+        return null;
+      }
+      const verified: Partial<Record<ModelName, boolean>> = {};
+      for (const params of run.params) verified[params.model] = await payloadVerifies(params);
+      const value = { run, verified };
+      // The pointer may have moved between the two reads; key by what was actually read.
+      verifiedCache = { key: `${run.runId}|${run.activatedAt}`, value };
+      return value;
+    },
+
     async readActive() {
       // A batch is one transaction, so the run row and its parameters come from the same state.
       const [runResult, paramResult] = await db.batch([

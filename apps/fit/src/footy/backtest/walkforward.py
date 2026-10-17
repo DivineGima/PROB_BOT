@@ -16,15 +16,16 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from footy.config import MIN_TEAM_MATCHES
 from footy.ensemble.weights import ensemble_weights
 from footy.models.grid import Grid, markets, mix_grids
+from footy.models.registry import Fitter
 from footy.models.structure import window_matches
-from footy.models.types import FitConfig, FitOutcome, LeagueMap, TrainingMatch
+from footy.models.types import FitConfig, LeagueMap, TrainingMatch
 from footy.scoring import (
     FrequencyBaseline,
     MeanScores,
@@ -34,8 +35,6 @@ from footy.scoring import (
 )
 
 ENSEMBLE = "ensemble"  # the pooled forecast appears in results under this name
-
-Fitter = Callable[[Sequence[TrainingMatch], LeagueMap, date, FitConfig], FitOutcome]
 
 
 @dataclass(frozen=True)
@@ -82,6 +81,8 @@ class BacktestResult:
     models: dict[str, _Scores] = field(default_factory=dict)
     baseline: _Scores = field(default_factory=_Scores)
     fold_weights: list[dict[str, float]] = field(default_factory=list)  # ensemble weights per fold
+    # per-model 1X2 RPS behind the ensemble weights (same matches for every model)
+    rps_history: dict[str, list[float]] = field(default_factory=dict)
 
     def summary(self) -> dict[str, object]:
         """A JSON-safe summary: overall and per-competition means for each model and the baseline,
@@ -181,7 +182,9 @@ def run_backtest(
     use_ensemble = config.ensemble and len(fitters) > 1
     if use_ensemble:
         result.models[ENSEMBLE] = _Scores()
-    history: dict[str, list[float]] = {name: [] for name in fitters}  # 1X2 RPS of past forecasts
+    history = result.rps_history
+    for name in fitters:
+        history[name] = []
     ordered = sorted(matches, key=lambda m: m.match_date)
 
     for fold_start, fold_end in folds_for(config):
@@ -251,6 +254,9 @@ def run_backtest(
             result.baseline.add(m.comp_code, base_scored)
             for name, scored in forecasts.items():
                 result.models[name].add(m.comp_code, scored, base_scored.rps_1x2)
-                if name != ENSEMBLE:
-                    history[name].append(scored.rps_1x2)
+            # The rolling RPS series behind the ensemble weights must describe the SAME matches
+            # for every model, so a match enters them only when every fitted model forecast it.
+            if all(name in grids for name in fitted):
+                for name in fitted:
+                    history[name].append(forecasts[name].rps_1x2)
     return result

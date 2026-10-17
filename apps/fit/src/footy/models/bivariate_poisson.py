@@ -15,13 +15,21 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import date
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.optimize import minimize
 from scipy.special import gammaln
 
-from footy.models.grid import Grid, bivariate_poisson_grid, clip_rate
+from footy.models.grid import Grid, bivariate_poisson_grid, clip_covariance, clip_rate
+from footy.models.pooled import (
+    PooledStrengthModel,
+    fit_pooled,
+    read_base,
+    read_number,
+    sanity_and_diagnostics,
+    team_tables,
+)
 from footy.models.structure import Floats, Structure
 from footy.models.types import (
     MODEL_BP,
@@ -37,6 +45,10 @@ PAYLOAD_VERSION = 1
 LOG_LAMBDA3_BOUNDS = (-8.0, 0.0)  # lambda3 between about 0.0003 and 1
 LOG_LAMBDA3_START = float(np.log(0.1))
 
+# log(n!) for n = 0..63 (goals are at most 20): a table lookup replaces ten gammaln calls per
+# evaluation of the objective, which runs up to thousands of times per fit.
+_LOG_FACTORIAL = gammaln(np.arange(64) + 1.0)
+
 
 def log_pmf(x: Floats, y: Floats, eta1: Floats, eta2: Floats, theta3: float) -> Floats:
     """log P(x, y) per element; ``-inf`` where x or y is negative."""
@@ -45,19 +57,22 @@ def log_pmf(x: Floats, y: Floats, eta1: Floats, eta2: Floats, theta3: float) -> 
     ys = np.where(valid, y, 0.0)
     lam1, lam2, lam3 = np.exp(eta1), np.exp(eta2), float(np.exp(theta3))
     kmax = int(min(xs.max(initial=0.0), ys.max(initial=0.0)))
+    ix, iy = xs.astype(np.int64), ys.astype(np.int64)
     terms: list[NDArray[np.float64]] = []
     for k in range(kmax + 1):
         ok = valid & (xs >= k) & (ys >= k)
+        rest_x = np.where(ok, ix - k, 0)
+        rest_y = np.where(ok, iy - k, 0)
         term = (
             (xs - k) * eta1
             - lam1
-            - gammaln(xs - k + 1.0)
+            - _LOG_FACTORIAL[rest_x]
             + (ys - k) * eta2
             - lam2
-            - gammaln(ys - k + 1.0)
+            - _LOG_FACTORIAL[rest_y]
             + k * theta3
             - lam3
-            - gammaln(k + 1.0)
+            - _LOG_FACTORIAL[k]
         )
         terms.append(np.where(ok, term, -np.inf))
     stacked = np.vstack(terms)
@@ -92,71 +107,25 @@ def objective(theta: Floats, s: Structure) -> tuple[float, Floats]:
     return value, grad
 
 
-class BpModel:
+class BpModel(PooledStrengthModel):
     name = MODEL_BP
 
-    def __init__(
-        self,
-        mu: float,
-        gamma: float,
-        lambda3: float,
-        league_att: dict[str, float],
-        league_def: dict[str, float],
-        teams: dict[int, tuple[float, float, str]],
-        half_life_days: float,
-    ) -> None:
-        self.mu, self.gamma, self.lambda3 = mu, gamma, lambda3
-        self.league_att, self.league_def = league_att, league_def
-        self.teams = teams
-        self.half_life_days = half_life_days
-
-    def knows(self, team_id: int) -> bool:
-        return team_id in self.teams
-
-    def lambdas(self, home_id: int, away_id: int) -> tuple[float, float]:
-        home, away = self.teams[home_id], self.teams[away_id]
-        return (
-            float(np.exp(self.mu + self.gamma + home[0] + away[1])),
-            float(np.exp(self.mu + away[0] + home[1])),
-        )
+    def __init__(self, lambda3: float, **base: Any) -> None:
+        super().__init__(**base)
+        self.lambda3 = lambda3
 
     def grid(self, home_id: int, away_id: int, comp_code: str) -> Grid:
         lam1, lam2 = (clip_rate(x) for x in self.lambdas(home_id, away_id))
-        return bivariate_poisson_grid(lam1, lam2, clip_rate(self.lambda3))
+        return bivariate_poisson_grid(lam1, lam2, clip_covariance(self.lambda3))
 
     def to_payload(self) -> dict[str, object]:
-        return {
-            "payload_version": PAYLOAD_VERSION,
-            "model": MODEL_BP,
-            "mu": self.mu,
-            "gamma": self.gamma,
-            "lambda3": self.lambda3,
-            "half_life_days": self.half_life_days,
-            "league_att": self.league_att,
-            "league_def": self.league_def,
-            "teams": {str(t): [a, d, lg] for t, (a, d, lg) in sorted(self.teams.items())},
-        }
+        return {**self.base_payload(PAYLOAD_VERSION), "lambda3": self.lambda3}
 
     @classmethod
     def from_payload(cls, payload: dict[str, object]) -> BpModel:
-        if payload.get("payload_version") != PAYLOAD_VERSION or payload.get("model") != MODEL_BP:
-            raise ValueError("not a bivariate Poisson payload this code understands")
-        teams = payload["teams"]
-        league_att, league_def = payload["league_att"], payload["league_def"]
-        if not (
-            isinstance(teams, dict)
-            and isinstance(league_att, dict)
-            and isinstance(league_def, dict)
-        ):
-            raise ValueError("malformed bivariate Poisson payload")
         return cls(
-            mu=float(payload["mu"]),  # type: ignore[arg-type]
-            gamma=float(payload["gamma"]),  # type: ignore[arg-type]
-            lambda3=float(payload["lambda3"]),  # type: ignore[arg-type]
-            league_att={str(k): float(v) for k, v in league_att.items()},
-            league_def={str(k): float(v) for k, v in league_def.items()},
-            teams={int(t): (float(v[0]), float(v[1]), str(v[2])) for t, v in teams.items()},
-            half_life_days=float(payload["half_life_days"]),  # type: ignore[arg-type]
+            lambda3=read_number(payload, "lambda3"),
+            **read_base(payload, MODEL_BP, PAYLOAD_VERSION),
         )
 
 
@@ -168,50 +137,27 @@ def fit_bivariate_poisson(
 ) -> tuple[BpModel, dict[str, object]]:
     cfg = config or FitConfig()
     s = Structure.build(matches, leagues, as_of, cfg)
-    x0 = np.append(s.initial(), LOG_LAMBDA3_START)
-    bounds = [*s.bounds(), LOG_LAMBDA3_BOUNDS]
-    result = minimize(
-        objective,
-        x0,
-        args=(s,),
-        jac=True,
-        method="L-BFGS-B",
-        bounds=bounds,
-        options={"maxiter": cfg.max_iterations, "ftol": cfg.tolerance, "gtol": 1e-6},
+    base, theta3, value, iterations = fit_pooled(
+        objective, s, LOG_LAMBDA3_START, LOG_LAMBDA3_BOUNDS, cfg
     )
-    if not result.success:
-        raise ModelFitError(f"optimiser did not converge: {result.message}")
-    if not np.isfinite(result.fun):
-        raise ModelFitError("objective is not finite")
-    base, theta3 = result.x[:-1], float(result.x[-1])
     lambda3 = float(np.exp(theta3))
-    eta1, eta2 = s.log_lambdas(base)
-    checks = s.check_strengths(base, eta1, eta2)
-    att, dfn = s.strengths(base)
-    league_att, league_def = s.league_offsets(base)
-    teams = {
-        tid: (float(att[i]), float(dfn[i]), s.leagues[int(s.team_league[i])])
-        for i, tid in enumerate(s.team_ids)
-    }
+    diagnostics = sanity_and_diagnostics(s, base, value, iterations)
+    league_att, league_def, teams = team_tables(s, base)
     model = BpModel(
-        float(base[0]), float(base[1]), lambda3, league_att, league_def, teams, cfg.half_life_days
+        lambda3=lambda3,
+        mu=float(base[0]),
+        gamma=float(base[1]),
+        league_att=league_att,
+        league_def=league_def,
+        teams=teams,
+        half_life_days=cfg.half_life_days,
     )
     typical = bivariate_poisson_grid(
         float(np.exp(base[0] + base[1])), float(np.exp(base[0])), lambda3
     )
     if abs(float(typical.sum()) - 1.0) > 1e-9:
         raise ModelFitError("the test grid does not sum to 1")
-    diagnostics: dict[str, object] = {
-        "iterations": int(result.nit),
-        "objective": float(result.fun),
-        "n_matches": len(s.x),
-        "n_teams": s.n_teams,
-        "effective_matches": float(s.w.sum()),
-        "lambda3": lambda3,
-        "home_advantage": float(base[1]),
-        **checks,
-    }
-    return model, diagnostics
+    return model, {**diagnostics, "lambda3": lambda3}
 
 
 def fit_bp_outcome(
