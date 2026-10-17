@@ -17,3 +17,18 @@ export const MAX_SECRET_LENGTH = 256;
 export const MAX_UPDATE_BODY_BYTES = 64 * 1024;
 /** The spike payload (60 matches + model blobs, about 250 KB) is far larger than an update. */
 export const MAX_SPIKE_BODY_BYTES = 1024 * 1024;
+
+/** Screener file limits (section 3.2, 6.1). The cap is ours: Telegram would allow far more. */
+export const MAX_FILE_BYTES = 256 * 1024;
+/** A prediction is only made for a kickoff strictly in the future and at most this far away. */
+export const MAX_KICKOFF_AHEAD_MS = 48 * 60 * 60 * 1000;
+/** Replies are split at match-block boundaries below Telegram's 4,096-character limit (section 8.8). */
+export const MAX_REPLY_CHARS = 3900;
+/** The STALE MODELS banner age when the run's config does not say (ADR-015). */
+export const DEFAULT_STALE_HOURS = 36;
+/** At most this many validation paths are shown for a rejected file (section 6.3). */
+export const MAX_ERROR_PATHS = 5;
+
+export const TELEGRAM_API_BASE = "https://api.telegram.org";
+/** A 429 with a longer `retry_after` than this is not waited out (section 9.4). */
+export const MAX_RETRY_AFTER_SECONDS = 5;

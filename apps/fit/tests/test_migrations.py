@@ -14,6 +14,7 @@ STAGE_1_TABLES = {"events", "job_runs", "processed_updates", "uploads"}
 STAGE_2_TABLES = {"competitions", "teams", "team_aliases", "matches", "source_fetch_log"}
 STAGE_4_TABLES = {"model_runs", "active_run", "model_params", "team_form"}
 STAGE_5A_TABLES = {"fixture_forecasts"}
+STAGE_5B_TABLES = {"predictions", "omissions"}
 
 
 def migration_files() -> list[Path]:
@@ -46,19 +47,21 @@ def test_migration_files_are_sequential_and_named() -> None:
         assert name.startswith(f"{index:04d}_"), f"gap or misnumbering at {name}"
 
 
-def test_applies_cleanly_to_an_empty_database_and_creates_only_stage_1_to_5a_tables(
+def test_applies_cleanly_to_an_empty_database_and_creates_only_stage_1_to_5b_tables(
     db: sqlite3.Connection,
 ) -> None:
     apply(db, migration_files())
-    assert tables(db) >= STAGE_1_TABLES | STAGE_2_TABLES | STAGE_4_TABLES | STAGE_5A_TABLES
+    expected = STAGE_1_TABLES | STAGE_2_TABLES | STAGE_4_TABLES | STAGE_5A_TABLES | STAGE_5B_TABLES
+    assert tables(db) >= expected
     # ADR-033: later-stage tables must not exist yet.
-    assert not {"predictions", "omissions", "calibration_snapshots"} & tables(db)
+    assert not {"calibration_snapshots"} & tables(db)
 
 
 def test_applies_step_by_step_on_top_of_the_previous_schema(db: sqlite3.Connection) -> None:
     for path in migration_files():
         apply(db, [path])
-    assert tables(db) >= STAGE_1_TABLES | STAGE_2_TABLES | STAGE_4_TABLES | STAGE_5A_TABLES
+    expected = STAGE_1_TABLES | STAGE_2_TABLES | STAGE_4_TABLES | STAGE_5A_TABLES | STAGE_5B_TABLES
+    assert tables(db) >= expected
 
 
 def test_uploads_defaults_to_received_and_checks_status(db: sqlite3.Connection) -> None:

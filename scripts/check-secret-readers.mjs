@@ -9,6 +9,9 @@ import { report, walk } from "./lib/walk.mjs";
 const NAMES = /\b(WEBHOOK_PATH_SECRET|TELEGRAM_WEBHOOK_SECRET|ALLOWED_CHAT_ID|ALLOWED_USER_ID)\b/;
 const SCANNED = /^apps\/bot\/src\/.*\.ts$/;
 const EXEMPT = /^apps\/bot\/src\/(auth\/|config\/env\.ts$)/;
+// Version 2 (ADR-043): a second, narrower rule. Only the `telegram/` module reads the bot token.
+const TOKEN_NAME = /\bTELEGRAM_BOT_TOKEN\b/;
+const TOKEN_EXEMPT = /^apps\/bot\/src\/(telegram\/|config\/env\.ts$)/;
 
 /**
  * @param {string} root
@@ -18,12 +21,14 @@ export function findSecretReaders(root) {
   /** @type {string[]} */
   const violations = [];
   for (const file of walk(root)) {
-    if (!SCANNED.test(file) || EXEMPT.test(file)) continue;
+    if (!SCANNED.test(file)) continue;
     readFileSync(path.join(root, file), "utf8")
       .split(/\r?\n/)
       .forEach((line, i) => {
-        if (NAMES.test(line))
+        if (!EXEMPT.test(file) && NAMES.test(line))
           violations.push(`${file}:${i + 1}: reads an auth secret outside auth/`);
+        if (!TOKEN_EXEMPT.test(file) && TOKEN_NAME.test(line))
+          violations.push(`${file}:${i + 1}: reads the bot token outside telegram/`);
       });
   }
   return violations;

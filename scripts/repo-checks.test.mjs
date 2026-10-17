@@ -89,6 +89,18 @@ describe("check-secret-readers", () => {
     assert.deepEqual(findSecretReaders(root), []);
   });
 
+  it("lets only telegram/ and the Env type read the bot token", () => {
+    const root = tree({
+      "apps/bot/src/telegram/client.ts": "env.TELEGRAM_BOT_TOKEN\n",
+      "apps/bot/src/config/env.ts": "TELEGRAM_BOT_TOKEN?: string;\n",
+      "apps/bot/src/upload/index.ts": "const t = env.TELEGRAM_BOT_TOKEN;\n",
+      "apps/bot/src/auth/index.ts": "env.TELEGRAM_BOT_TOKEN\n",
+    });
+    const found = findSecretReaders(root);
+    assert.equal(found.length, 2);
+    assert.ok(found.every((v) => v.includes("bot token outside telegram/")));
+  });
+
   it("passes on the real repository", () => {
     assert.deepEqual(findSecretReaders(REPO_ROOT), []);
   });
