@@ -8,6 +8,7 @@ import { handleSpike } from "./spike";
 import { type Sleep, telegramFromEnv } from "./telegram/client";
 import { classifyUpdate, extractDocument } from "./telegram/update";
 import { handleDocument, sendUsageHint, type UploadOutcome } from "./upload";
+import { runWatchdog, type WatchdogOutcome, watchdogDeps } from "./watchdog";
 
 /**
  * Entry point: routing only. Flow (sections 6.2, 7.8):
@@ -188,6 +189,28 @@ export async function handleFetch(
   return handleTelegramUpdate(request, env, ctx, requestId, services);
 }
 
+/** The cron trigger (every six hours): the watchdog. Awaited, so the run is complete and logged. */
+export async function handleScheduled(
+  env: Env,
+  services: Services = defaultServices,
+): Promise<WatchdogOutcome> {
+  const repos = createRepositories(env.DB, services.now);
+  const outcome = await runWatchdog(watchdogDeps(env, repos, services));
+  logRequest({
+    request_id: crypto.randomUUID(),
+    route: "other",
+    outcome: "watchdog",
+    n_findings: outcome.findings,
+    n_sent: outcome.sent,
+    n_skipped: outcome.skipped,
+    n_failed: outcome.failed,
+  });
+  return outcome;
+}
+
 export default {
   fetch: handleFetch,
+  async scheduled(_controller, env, ctx) {
+    ctx.waitUntil(handleScheduled(env));
+  },
 } satisfies ExportedHandler<Env>;

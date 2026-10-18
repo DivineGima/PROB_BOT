@@ -26,6 +26,10 @@ export const MAX_KICKOFF_AHEAD_MS = 48 * 60 * 60 * 1000;
 export const MAX_REPLY_CHARS = 3900;
 /** The STALE MODELS banner age when the run's config does not say (ADR-015). */
 export const DEFAULT_STALE_HOURS = 36;
+/** An upload still `received` this long was acknowledged and never answered (ADR-029). */
+export const STUCK_UPLOAD_MINUTES = 10;
+/** The watchdog wants forecasts for today and the next day when fixtures are scheduled (ADR-015). */
+export const WATCHDOG_FORECAST_DAYS = 2;
 /** At most this many validation paths are shown for a rejected file (section 6.3). */
 export const MAX_ERROR_PATHS = 5;
 

@@ -561,3 +561,45 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 | Stage 5b | **complete** (CPU target missed, accepted, ADR-048) |
 | Stage 6 | code complete; live checks (`score`, `report`) **in-progress** |
 | Stage 7: alerts, watchdog, schedule, go-live | **next** (not started) |
+
+---
+
+## 2026-10-18 (Stage 7) - Alerts, health check, nightly schedule, watchdog, backup, runbook (code complete, not yet merged)
+
+- **Built against:** `PRD_2.md`, `system_architecture_2.md`, `system_architecture_essential_2.md` Stage 7 (all N=2). Branch `feat/stage-7-alerts-watchdog`; not committed, no PR yet (Divine asked to wait).
+- **Python:** migration `0007_event_delivery.sql` (`events.delivered_at`, additive); `alerts/catalogue.py` (wording), `alerts/deliver.py` (`flush_alerts`, `alert_with_text`); `health.py` and `repo/health.py` (five checks); `footy healthcheck` and `footy alert --flush|--text`; `OpsRepo.pending_alerts` and `mark_delivered`; config constants. Ingest's `warn` events (unmapped team, canonical update, anomalies) are delivered as alerts without touching ingest.
+- **Workflows:** `nightly.yml` (cron `17 1 * * *`, off until variable `NIGHTLY_ENABLED` is `true`, 45 min, concurrency shared with `data.yml`, least-privilege secrets per step, `if: always()` alert delivery and `if: failure()` failure alert) and `backup.yml` (weekly `wrangler d1 export`, checked, 30-day artifact; `upload-artifact` pinned to `cf430e03...` v7.0.2).
+- **Worker:** `watchdog/` (no run, stale run, missing forecasts, stuck upload; once per 24 h per finding; recorded only after Telegram accepted), `scheduled` handler, cron `7 */6 * * *` in `wrangler.toml`, `auth.alertChatId`, `HealthRepository.forecastCoverage`, `EventRepository.hasRecent`; the usage-hint path now records `bot_token_missing` (found live: a bad token was silent).
+- **Docs:** `docs/runbook.md` (daily ritual, alert table, rollback, rotation, restore drill, auto-disable check, go-live checklist). Architecture 2 (section 9.3 backup row, as-built rows) and essentials 2 (Stage 7 as-built) corrected; PRD_2 untouched.
+- **Tests:** Python 601 (was 564 + 37 new), Worker 238 (was 220 + 18 new), script tests 50; ruff, mypy strict, tsc, SQL-locality, secret-reader, migration lint clean.
+- **Verified live: nothing yet.** After merge and deploy: the migration applies; the cron trigger registers; a manual `nightly` run; a manual `backup` run (the D1 token must be allowed to export: first run proves it); an alert actually arriving; set `NIGHTLY_ENABLED`; seven green nights; the drills in the runbook.
+- **Still open:** the items of the earlier entries (secret `TELEGRAM_CHAT_ID`, `score` and `report` on played matches, first `backtest.yml`, the 16 test predictions, screener gate codes, `claude.md` wording, missing design-rules file, git identity, `d1-probe`, pi-rating memo follow-up).
+
+### Module status
+| Module | Status |
+|---|---|
+| Stages 1 to 6 | **complete** (live checks of Stage 6 pending) |
+| Stage 7 | code **complete**; live proof and go-live checklist **in-progress** (Divine) |
+
+---
+
+## 2026-10-18 (Stage 7 review) - Code review of Stage 7; findings repaired; source of truth re-aligned
+
+- **Built against:** `PRD_2.md`, `system_architecture_2.md`, `system_architecture_essential_2.md` Stage 7 (all N=2). Branch `feat/stage-7-alerts-watchdog`.
+- **Review:** `/code-review` at high effort: 10 findings. Each was checked against the code before acting: **8 real and fixed, 1 dead code removed, 1 not a defect.** Tests now: Python 605, Worker 238, script tests 50; ruff, mypy strict, tsc and the repo rule checks clean.
+
+| # | Where | Problem | Why it matters | Fix |
+|---|---|---|---|---|
+| 1 | `health.py` | The `bot_token` check counted only `bot_token_missing` | A token Telegram refuses, a bad chat id or a watchdog crash left the Worker unable to alert and nothing told anyone (NFR-08) | It counts `bot_token_missing`, `alert_chat_invalid`, `alert_send_failed` and `watchdog_failed`. Test per kind |
+| 2 | migration `0007` | A partial index on `delivered_at IS NULL` | Almost every event stays NULL, so the index was the whole table and the delivery query could scan 90 days of events | No index: the 48 h window uses `idx_events_at` |
+| 3 | `nightly.yml` | An unhealthy night also fired the generic "nightly failed" alert | One fault gave several messages a night | The failure step skips when the health step is the failed one; its own alert explains it |
+| 4 | `health.py` | The token report looked back 48 h with no "fixed since" | The check stayed red for two nights after the fix | Look back 24 h; documented in the runbook |
+| 5 | `backup.yml` | Own concurrency group; D1 export blocks the database | The Sunday export could overlap a nightly or an upload | Same group as the data runs (`footy-data`) |
+| 6 | `alerts/deliver.py` | `alert_with_text` re-sent directly after any exception, including a failed "mark delivered" after Telegram had accepted | The same alert twice, a third time at the next flush | Only a failed recording falls back to a direct send; a failure after recording leaves the alert pending. Test |
+| 7 | `alerts/deliver.py` | All pending alerts were marked delivered although only the first 20 were shown | The rest were lost ("and N more") | Sent in messages of 20, each marked after its own send. Tests, including a failure on the second message |
+| 8 | `health.py` | The nightly check used the constant 36 h; the Worker uses the run's `stale_hours` | Two checks disagreed about when a run is stale | The nightly check reads the run's own limit. Test |
+| 9 | `repo/health.py` | `last_finished_job` was never used | Dead code that looked like a job-freshness check | Removed |
+| 10 | watchdog and health | A day with scheduled fixtures and no forecast rows could mean "no team can be forecast" | **Not a defect:** the fit writes a row for every scheduled fixture in the window, with verdict `NO_MODEL` or `INSUFFICIENT_HISTORY` when it cannot forecast, so zero rows on a day with fixtures means the job did not cover it | None |
+
+- **Source of truth:** `system_architecture_2.md` (health-check and delivery as-built rows) and `docs/runbook.md` corrected to match the fixes. Essentials 2 and PRD_2 needed no change.
+- **Still open:** the live proof list of the previous Stage 7 entry; the earlier open items.

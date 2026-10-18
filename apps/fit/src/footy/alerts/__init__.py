@@ -1,8 +1,10 @@
-"""Alert stub (architecture section 9.2). Full alerting is Stage 7.
+"""Alerts (architecture section 9.2).
 
-Stage 4 only needs a place to say "a human should look at this": an ``alert`` event, deduplicated
-per key over 24 hours (section 9.6). Stage 7 adds the Telegram sender that reads these events and
-the message catalogue; callers do not change.
+A job that wants a human to look at something records an ``alert`` event, deduplicated per key over
+24 hours (section 9.6): ``raise_alert``. ``footy alert --flush`` (the last nightly step) turns every
+event that was not sent yet into one Telegram message: ``deliver.flush_alerts``, with the wording in
+``catalogue``. Callers of ``raise_alert`` never talk to Telegram, so a failed send cannot fail the
+job that raised the alert.
 """
 
 from __future__ import annotations

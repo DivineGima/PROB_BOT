@@ -5,7 +5,8 @@ window is not written again (section 9.2: at most one alert per key per 24 h).""
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from footy.config import EVENT_DEDUPE_HOURS
@@ -22,6 +23,22 @@ def _cutoff(at: str, hours: int) -> str:
 
 def _minutes_before(at: str, minutes: int) -> str:
     return (datetime.strptime(at, _TS) - timedelta(minutes=minutes)).strftime(_TS)
+
+
+@dataclass(frozen=True)
+class PendingAlert:
+    """An event that a person should hear about and that has not been sent yet."""
+
+    event_id: int
+    at: str
+    kind: str
+    detail: dict[str, object]
+
+
+# Events that are alerts although they were written at level ``warn`` by the ingest job (unmapped
+# teams, source anomalies, canonical-list updates; section 9.2). ``anomaly_%`` is a prefix.
+_WARN_ALERT_KINDS = ("unmapped_team", "canonical_update_needed")
+_DELIVERY_CHUNK = 90  # D1 allows 100 bound parameters per statement
 
 
 class OpsRepo:
@@ -128,6 +145,49 @@ class OpsRepo:
             ]
         )
         return int(rows[1][0]["n"]) > 0
+
+    def pending_alerts(self, at: str, within_hours: int, limit: int = 200) -> list[PendingAlert]:
+        """Alert events from the last ``within_hours`` that were never delivered, oldest first."""
+        marks = ", ".join("?" for _ in _WARN_ALERT_KINDS)
+        rows = self._db.query(
+            "SELECT event_id, at, kind, detail_json FROM events "  # noqa: S608
+            "WHERE delivered_at IS NULL AND at >= ? AND "
+            f"(level = 'alert' OR kind IN ({marks}) OR kind LIKE 'anomaly\\_%' ESCAPE '\\') "
+            "ORDER BY event_id LIMIT ?",
+            (_cutoff(at, within_hours), *_WARN_ALERT_KINDS, limit),
+        )
+        out: list[PendingAlert] = []
+        for r in rows:
+            try:
+                detail = json.loads(r["detail_json"]) if r["detail_json"] else {}
+            except (TypeError, ValueError):
+                detail = {}
+            out.append(
+                PendingAlert(
+                    event_id=int(r["event_id"]),
+                    at=str(r["at"]),
+                    kind=str(r["kind"]),
+                    detail=detail if isinstance(detail, dict) else {},
+                )
+            )
+        return out
+
+    def mark_delivered(self, event_ids: Sequence[int], at: str) -> None:
+        """Record that these alert events reached Telegram (idempotent: a delivered row keeps its
+        first timestamp)."""
+        statements = []
+        for start in range(0, len(event_ids), _DELIVERY_CHUNK):
+            chunk = list(event_ids[start : start + _DELIVERY_CHUNK])
+            marks = ", ".join("?" for _ in chunk)
+            statements.append(
+                Statement(
+                    "UPDATE events SET delivered_at = ? WHERE delivered_at IS NULL "  # noqa: S608
+                    f"AND event_id IN ({marks})",
+                    (at, *chunk),
+                )
+            )
+        if statements:
+            self._db.batch(statements)
 
     def fail_stale_jobs(self, at: str, older_than_minutes: int) -> int:
         """Close ``running`` rows started more than ``older_than_minutes`` ago (a job killed by the

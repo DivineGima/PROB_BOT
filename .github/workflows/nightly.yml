@@ -1,0 +1,95 @@
+name: nightly
+
+# The nightly job (architecture sections 9.2 and 9.3, Stage 7): ingest, score, fit and publish, on
+# Mondays the weekly report, then the health check and the delivery of every alert raised on the way.
+# A failed step sends an alert of its own. A night that never starts is caught by the Worker's
+# watchdog (ADR-015), not by this file.
+#
+# First enablement is deliberate: the schedule does nothing until the repository variable
+# NIGHTLY_ENABLED is set to "true" (Settings > Secrets and variables > Actions > Variables), which
+# Divine does after one manual run (Run workflow) has gone green end to end.
+on:
+  schedule:
+    - cron: "17 1 * * *" # 01:17 UTC = 06:47 IST; not on the hour, when GitHub delays runs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# The same group as the manual data runs: a nightly run never overlaps a hand-started fit.
+concurrency:
+  group: footy-data
+  cancel-in-progress: false
+
+jobs:
+  nightly:
+    name: nightly
+    # Only the reviewed code on main may touch the database; a scheduled run needs the switch.
+    if: github.ref == 'refs/heads/main' && (github.event_name != 'schedule' || vars.NIGHTLY_ENABLED == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Least privilege: the database token is the only secret every step shares. football-data.org
+    # reaches `ingest` only, Telegram reaches the report and the alert steps only.
+    env:
+      PYTHONPATH: src
+      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      D1_DATABASE_ID: ${{ secrets.D1_DATABASE_ID }}
+      CF_D1_TOKEN: ${{ secrets.CF_D1_TOKEN }}
+      GITHUB_SHA: ${{ github.sha }}
+    defaults:
+      run:
+        working-directory: apps/fit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned, hash-checked dependencies
+        run: python -m pip install --require-hashes -r requirements.txt
+
+      - name: Ingest results and fixtures
+        env:
+          SOURCE_ENABLED_FDORG: "1" # the legal register entry is signed (docs/legal/source_terms_register.md)
+          FD_ORG_TOKEN: ${{ secrets.FD_ORG_TOKEN }}
+        # Exit 3 is a source outage: carry on with the stored data (FR-17); the outage is an event.
+        run: |
+          python -m footy.cli ingest || { rc=$?; if [ "$rc" -eq 3 ]; then echo "source outage: continuing with stored data"; else exit "$rc"; fi; }
+
+      - name: Score predictions
+        run: python -m footy.cli score
+
+      - name: Fit the models and store the forecasts
+        # Exit 4 is a partial fit (a model failed); publish decides whether the run is good enough.
+        run: |
+          python -m footy.cli fit || { rc=$?; if [ "$rc" -eq 4 ]; then echo "partial fit: the gate decides"; else exit "$rc"; fi; }
+
+      - name: Publish the run
+        run: python -m footy.cli publish
+
+      - name: Weekly report (Mondays)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m footy.cli report --send --monday-only
+
+      - name: Health check
+        id: health
+        # Red when unhealthy, but the alert below says why; no second "failed" message.
+        run: python -m footy.cli healthcheck
+
+      - name: Send the alerts raised tonight
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m footy.cli alert --flush
+
+      - name: Alert that the nightly job failed
+        if: failure() && steps.health.outcome != 'failure'
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python -m footy.cli alert --key "nightly:$(date -u +%F)" --text "The nightly job failed. See $RUN_URL"
