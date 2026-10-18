@@ -603,3 +603,12 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 
 - **Source of truth:** `system_architecture_2.md` (health-check and delivery as-built rows) and `docs/runbook.md` corrected to match the fixes. Essentials 2 and PRD_2 needed no change.
 - **Still open:** the live proof list of the previous Stage 7 entry; the earlier open items.
+
+---
+
+## 2026-10-18 (first live nightly run) - Stage 7 proven on production; anomaly alerts grouped
+
+- **Built against:** `PRD_2.md`, `system_architecture_2.md`, `system_architecture_essential_2.md` Stage 7 (all N=2). Branch `fix/group-anomaly-alerts`.
+- **Live result (manual run of `nightly`, run 39083505527, 2 min 48 s, every step green, failure alert skipped as designed):** ingest ok (123 matches unchanged), score (16 pending, none played yet), fit (49 forecasts, all three models ok), publish promoted (carry-over 49 of 49), Monday report skipped (not a Monday), health check healthy (all five checks ok), alert delivery sent 42 alerts in 3 messages. Migration `0007` and the cron `7 */6 * * *` deployed with PR 25.
+- **Found live:** all 42 alerts were `anomaly_status_regression` (27 fixtures that the feed reports going from FINISHED back to TIMED), one line each, and each would come back every night when the 24 h dedupe lapses. `flush_alerts` now sends source anomalies of one kind as one line with a count ("(27 fixtures in all)"); the events are marked delivered together. Test added; Python 606 tests, ruff, mypy strict (src and tests) clean.
+- **Open:** whether the 27 status regressions are a real feed problem (they were first seen on 2026-10-16); `backup` first run; `NIGHTLY_ENABLED`; seven green nights; the drills; the earlier open items.
