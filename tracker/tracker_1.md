@@ -612,3 +612,11 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 - **Live result (manual run of `nightly`, run 39083505527, 2 min 48 s, every step green, failure alert skipped as designed):** ingest ok (123 matches unchanged), score (16 pending, none played yet), fit (49 forecasts, all three models ok), publish promoted (carry-over 49 of 49), Monday report skipped (not a Monday), health check healthy (all five checks ok), alert delivery sent 42 alerts in 3 messages. Migration `0007` and the cron `7 */6 * * *` deployed with PR 25.
 - **Found live:** all 42 alerts were `anomaly_status_regression` (27 fixtures that the feed reports going from FINISHED back to TIMED), one line each, and each would come back every night when the 24 h dedupe lapses. `flush_alerts` now sends source anomalies of one kind as one line with a count ("(27 fixtures in all)"); the events are marked delivered together. Test added; Python 606 tests, ruff, mypy strict (src and tests) clean.
 - **Open:** whether the 27 status regressions are a real feed problem (they were first seen on 2026-10-16); `backup` first run; `NIGHTLY_ENABLED`; seven green nights; the drills; the earlier open items.
+
+---
+
+## 2026-10-18 (backup and restore drill) - Backup proven; restore drill passed
+
+- **Backup:** manual run of `backup` (run 39084262728) green in 27 s; export 4.6 MB, so the nightly D1 token is allowed to export; artifact `prob-bot-d1-export` kept 30 days.
+- **Restore drill (done by Claude Code with Divine's go-ahead):** downloaded that artifact, created the scratch database `prob-bot-restore-test`, loaded `prob-bot.sql` into it (81,591 rows written, 18 tables) and compared it with the live database: matches 9,280, teams 238, predictions 16, forecasts 98, model runs 4, events 42, migrations 7, and the same active run (`R20261018T004052Z`) in both. The scratch database and the downloaded file were then deleted. The live database was only read.
+- **Go-live checklist (docs/runbook.md section 8):** done: nightly run by hand green, backup run by hand green, restore drill. Still Divine's: set variable `NIGHTLY_ENABLED` to `true` (Settings, Secrets and variables, Actions, tab Variables), seven green nights, a real upload with `score` and the weekly `report` seen once, the decision on the 16 test predictions, the token-rotation drill.
