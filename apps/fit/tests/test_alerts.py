@@ -127,6 +127,22 @@ def test_ingest_warnings_count_as_alerts_but_other_warnings_do_not(db: SqliteD1)
     assert "something_quiet" not in sender.messages[0]
 
 
+def test_one_kind_of_source_anomaly_is_one_line_with_a_count(db: SqliteD1) -> None:
+    ops = OpsRepo(db)
+    for i in range(27):
+        ops.record_event(AT, "warn", "fd_org", "anomaly_status_regression", {"fd_match_id": i})
+    ops.record_event(AT, "warn", "fd_org", "anomaly_score_conflict", {"fd_match_id": 99})
+    raise_alert(ops, AT, "a", "all_models_failed", {"run_id": "R1"})
+    sender = FakeSender()
+    result = flush_alerts(ops, sender, AT)
+    assert (result.alerts, result.messages) == (29, 1)
+    lines = sender.messages[0].splitlines()
+    assert lines[0] == "ALERT: 3 alerts"
+    assert "(27 fixtures in all)" in lines[1] and "status_regression" in lines[1]
+    assert "score_conflict" in lines[2] and "fixtures in all" not in lines[2]
+    assert all(d is not None for d in delivered(db))
+
+
 def test_alerts_older_than_the_window_are_not_replayed(db: SqliteD1) -> None:
     ops = OpsRepo(db)
     old = "2026-10-10T01:00:00Z"

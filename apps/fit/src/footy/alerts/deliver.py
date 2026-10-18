@@ -9,13 +9,14 @@ dedupe in ``raise_alert`` keeps a persistent problem from producing a message a 
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
 from footy.alerts import raise_alert
 from footy.alerts.catalogue import describe
 from footy.config import ALERT_FLUSH_HOURS, ALERT_MAX_LINES
-from footy.repo.ops import OpsRepo
+from footy.repo.ops import OpsRepo, PendingAlert
 
 log = logging.getLogger("footy.alerts")
 
@@ -33,14 +34,36 @@ class FlushResult:
 def flush_alerts(ops: OpsRepo, sender: MessageSender, at: str) -> FlushResult:
     """Send every undelivered alert from the last ``ALERT_FLUSH_HOURS``, oldest first."""
     pending = ops.pending_alerts(at, ALERT_FLUSH_HOURS)
+    units = _units(pending)
     messages = 0
-    for start in range(0, len(pending), ALERT_MAX_LINES):
-        chunk = pending[start : start + ALERT_MAX_LINES]
-        lines = [f"- {describe(a.kind, a.detail)}" for a in chunk]
+    for start in range(0, len(units), ALERT_MAX_LINES):
+        chunk = units[start : start + ALERT_MAX_LINES]
         noun = "alert" if len(chunk) == 1 else "alerts"
-        messages += sender.send_message(f"ALERT: {len(chunk)} {noun}\n" + "\n".join(lines))
-        ops.mark_delivered([a.event_id for a in chunk], at)
+        text = f"ALERT: {len(chunk)} {noun}\n" + "\n".join(f"- {line}" for line, _ in chunk)
+        messages += sender.send_message(text)
+        ops.mark_delivered([i for _, ids in chunk for i in ids], at)
     return FlushResult(len(pending), messages)
+
+
+def _units(pending: Sequence[PendingAlert]) -> list[tuple[str, list[int]]]:
+    """(line, event ids) per message line. Source anomalies of one kind share a line with a count:
+    a feed quirk that touches dozens of fixtures every night is one piece of news, not dozens."""
+    lines: list[tuple[str, list[int]]] = []
+    slot: dict[str, int] = {}  # anomaly kind -> its line
+    counts: dict[str, int] = {}
+    for a in pending:
+        if a.kind.startswith("anomaly_"):
+            if a.kind in slot:
+                lines[slot[a.kind]][1].append(a.event_id)
+                counts[a.kind] += 1
+                continue
+            slot[a.kind] = len(lines)
+            counts[a.kind] = 1
+        lines.append((describe(a.kind, a.detail), [a.event_id]))
+    for kind, index in slot.items():
+        if counts[kind] > 1:
+            lines[index] = (f"{lines[index][0]} ({counts[kind]} fixtures in all)", lines[index][1])
+    return lines
 
 
 def alert_with_text(
