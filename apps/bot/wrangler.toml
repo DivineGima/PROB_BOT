@@ -6,8 +6,13 @@ compatibility_date = "2026-10-01"
 [observability]
 enabled = true
 
+# The watchdog (ADR-015, ADR-029): every six hours, at minute 7 (not on the hour). It alerts when the
+# nightly job did not publish, when forecasts are missing, or when an upload was never answered.
+[triggers]
+crons = ["7 */6 * * *"]
+
 # Secrets (set with `wrangler secret put`, never in this file):
-#   TELEGRAM_WEBHOOK_SECRET, WEBHOOK_PATH_SECRET, ALLOWED_CHAT_ID, ALLOWED_USER_ID
+#   TELEGRAM_WEBHOOK_SECRET, WEBHOOK_PATH_SECRET, ALLOWED_CHAT_ID, ALLOWED_USER_ID, TELEGRAM_BOT_TOKEN
 # SPIKE_ENABLED is a plain var for the Stage 1 CPU spike path; it is off unless set to "1".
 [vars]
 SPIKE_ENABLED = "0" # the Stage 1 CPU gate is recorded (docs/verification.md section 2); set to "1" only to re-measure

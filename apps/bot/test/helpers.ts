@@ -40,6 +40,7 @@ export async function resetWorld(): Promise<void> {
     env.DB.prepare("DELETE FROM model_runs"),
     env.DB.prepare("DELETE FROM events"),
     env.DB.prepare("DELETE FROM processed_updates"),
+    env.DB.prepare("DELETE FROM matches"),
     env.DB.prepare("DELETE FROM teams"),
     env.DB.prepare("DELETE FROM competitions"),
   ]);

@@ -70,6 +70,20 @@ export interface UploadRepository {
 
 export interface EventRepository {
   record(event: NewEvent): Promise<void>;
+  /** True when an event with this dedupe key was written in the last 24 hours (section 9.2). */
+  hasRecent(dedupeKey: string): Promise<boolean>;
+}
+
+/** One day of the watchdog's coverage question: fixtures still to play, forecasts stored for them. */
+export interface DayCoverage {
+  date: string;
+  scheduled: number;
+  forecasts: number;
+}
+
+export interface HealthRepository {
+  /** For each date: scheduled matches, and the active run's forecast rows (0 without an active run). */
+  forecastCoverage(dates: string[]): Promise<DayCoverage[]>;
 }
 
 export type ModelName = "dc" | "pi" | "bp";
@@ -237,6 +251,7 @@ export interface Repositories {
   forecasts: ForecastRepository;
   predictions: PredictionRepository;
   teams: TeamRepository;
+  health: HealthRepository;
 }
 
 /** Lower-case hex SHA-256 of the text's UTF-8 bytes, the form `model_params.payload_sha256` uses. */
@@ -581,6 +596,15 @@ export function createRepositories(db: D1Database, clock: Clock = () => new Date
         .bind(toIso(at), event.level, event.source, event.kind, detail, event.dedupeKey, cutoff)
         .run();
     },
+
+    async hasRecent(dedupeKey) {
+      const cutoff = toIso(new Date(clock().getTime() - EVENT_DEDUPE_MS));
+      const row = await db
+        .prepare("SELECT 1 AS found FROM events WHERE dedupe_key = ?1 AND at >= ?2 LIMIT 1")
+        .bind(dedupeKey, cutoff)
+        .first<{ found: number }>();
+      return row !== null;
+    },
   };
 
   const readPointer = async (): Promise<ActivePointer | null> =>
@@ -735,5 +759,30 @@ export function createRepositories(db: D1Database, clock: Clock = () => new Date
     },
   };
 
-  return { updates, uploads, events, runs, forecasts, predictions, teams };
+  const health: HealthRepository = {
+    async forecastCoverage(dates) {
+      if (dates.length === 0) return [];
+      // One batch = one transaction, so every day is read against the same active run.
+      const results = await db.batch(
+        dates.map((date) =>
+          db
+            .prepare(
+              `SELECT
+                 (SELECT COUNT(*) FROM matches
+                   WHERE match_date = ?1 AND status IN ('SCHEDULED', 'TIMED')) AS scheduled,
+                 (SELECT COUNT(*) FROM fixture_forecasts
+                   WHERE run_id = (SELECT run_id FROM active_run WHERE id = 1)
+                     AND match_date = ?1) AS forecasts`,
+            )
+            .bind(date),
+        ),
+      );
+      return dates.map((date, i) => {
+        const row = results[i]?.results[0] as { scheduled: number; forecasts: number } | undefined;
+        return { date, scheduled: row?.scheduled ?? 0, forecasts: row?.forecasts ?? 0 };
+      });
+    },
+  };
+
+  return { updates, uploads, events, runs, forecasts, predictions, teams, health };
 }

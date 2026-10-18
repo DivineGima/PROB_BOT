@@ -113,7 +113,16 @@ async function sha256Bytes(bytes: Uint8Array): Promise<string> {
 }
 
 export async function sendUsageHint(deps: UploadDeps, chatId: number): Promise<UploadOutcome> {
-  if (!deps.telegram) return { outcome: "no_telegram_client" };
+  if (!deps.telegram) {
+    // No token means no reply and no alert from here, so leave the trace the health check reads.
+    await deps.repos.events.record({
+      level: "error",
+      source: "bot",
+      kind: "bot_token_missing",
+      dedupeKey: `bot_token_missing:${hourKey(deps.now())}`,
+    });
+    return { outcome: "no_telegram_client" };
+  }
   const sent = await deps.telegram.send(chatId, USAGE_HINT);
   return { outcome: sent.ok ? "usage_hint" : "usage_hint_failed" };
 }

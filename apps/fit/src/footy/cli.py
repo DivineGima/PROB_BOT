@@ -1,6 +1,6 @@
 """``footy`` command line (architecture section 6.7). Stage 2 provides ``bootstrap`` and ``ingest``,
 Stage 3 adds ``backtest``, Stage 4 adds ``fit`` and ``publish``, Stage 6 adds ``score`` and
-``report``; the other commands in the table arrive with their stages.
+``report``, Stage 7 adds ``healthcheck`` and ``alert``.
 
 Exit codes: 0 ok, 1 unexpected, 2 data/validation failure, 3 source outage, 4 fit failure.
 The summary printed on stdout never contains tokens or raw source payloads.
@@ -17,6 +17,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from footy.alerts.deliver import alert_with_text, flush_alerts
 from footy.aliases import load_reference
 from footy.backtest.job import DEFAULT_FOLD_DAYS, DEFAULT_TEST_DAYS, run_backtest_job
 from footy.config import (
@@ -27,6 +28,7 @@ from footy.config import (
 )
 from footy.errors import ConfigError, ExitCode, FootyError
 from footy.fitting import run_fit_job
+from footy.health import run_healthcheck_job
 from footy.ingest.fd_org import FdOrgClient
 from footy.ingest.pacer import Pacer
 from footy.ingest.pipeline import (
@@ -40,6 +42,7 @@ from footy.models.registry import FITTERS
 from footy.models.types import MODELS
 from footy.publish.job import run_publish_job
 from footy.repo.d1_client import D1Client, D1Error, JsonFileProgress, MemoryProgress, Progress
+from footy.repo.ops import OpsRepo
 from footy.repo.ports import Database
 from footy.report.job import run_report_job
 from footy.score.job import run_score_job
@@ -152,6 +155,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--monday-only", action="store_true", help="do nothing unless today (UTC) is a Monday"
     )
 
+    sub.add_parser(
+        "healthcheck",
+        help="is the system doing its job? raises an alert event per failed check; exit 1 if any",
+    )
+
+    alert = sub.add_parser(
+        "alert",
+        help="send alerts to Telegram: the pending alert events, or a text (workflow failure)",
+    )
+    what = alert.add_mutually_exclusive_group(required=True)
+    what.add_argument(
+        "--flush", action="store_true", help="send every alert event that was not sent yet"
+    )
+    what.add_argument(
+        "--text", default=None, help="send this text as an alert (used when a workflow fails)"
+    )
+    alert.add_argument(
+        "--key",
+        default=None,
+        help="with --text: dedupe key (default: the text), at most one alert per key a day",
+    )
+
     publish = sub.add_parser(
         "publish", help="run the promotion gate and make a built run active (or roll back)"
     )
@@ -222,6 +247,30 @@ def _run_backtest(
         fail_on_regression=bool(args.fail_on_regression),
         regression_tolerance=float(args.regression_tolerance),
     )
+
+
+def _run_alert(
+    args: argparse.Namespace,
+    settings: Settings,
+    database_factory: DatabaseFactory,
+    sender_factory: SenderFactory,
+) -> JobResult:
+    """``alert --flush`` needs the database; ``alert --text`` runs when a workflow failed, often
+    because the database was the problem, so it falls back to sending the text directly."""
+    token, chat_id = settings.require_telegram()
+    sender = sender_factory(token, chat_id)
+    at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if args.flush:
+        flushed = flush_alerts(OpsRepo(database_factory(settings)), sender, at)
+        return JobResult(ExitCode.OK, {"mode": "alert-flush", **vars(flushed)})
+    ops: OpsRepo | None = None
+    try:
+        ops = OpsRepo(database_factory(settings))
+    except FootyError:  # the database settings are missing: still tell Divine
+        ops = None
+    key = args.key or args.text[:120]
+    sent = alert_with_text(ops, sender, at, key, args.text)
+    return JobResult(ExitCode.OK, {"mode": "alert-text", "sent": sent})
 
 
 def _progress(path: Path | None, dry_run: bool) -> Progress:
@@ -309,6 +358,10 @@ def main(
                 monday_only=bool(args.monday_only),
                 git_sha=git_sha,
             )
+        elif args.command == "healthcheck":
+            result = run_healthcheck_job(database_factory(settings), git_sha=git_sha)
+        elif args.command == "alert":
+            result = _run_alert(args, settings, database_factory, sender_factory)
         elif args.command == "publish":
             if args.run_id and args.rollback:
                 raise ConfigError("use either --run-id or --rollback, not both")

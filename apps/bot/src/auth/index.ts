@@ -147,3 +147,11 @@ export function checkSession(
 
   return { updateId, chatId: allowedChat, userId: allowedUser };
 }
+
+/**
+ * The chat the watchdog writes to: the allowlisted chat, read here because only `auth` may read the
+ * allowlist. Null when it is missing or malformed (the watchdog then records an event instead).
+ */
+export function alertChatId(env: Pick<Env, "ALLOWED_CHAT_ID">): number | null {
+  return parseAllowedId(env.ALLOWED_CHAT_ID);
+}
