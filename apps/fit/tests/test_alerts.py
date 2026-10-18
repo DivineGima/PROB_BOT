@@ -42,7 +42,7 @@ def delivered(db: SqliteD1) -> list[str | None]:
 
 
 def test_every_alert_kind_reads_as_one_plain_line() -> None:
-    cases = {
+    cases: dict[str, dict[str, object]] = {
         "run_rejected": {"run_id": "R1", "reasons": ["a", "b"]},
         "model_failed": {"model": "dc", "run_id": "R1", "error": "no convergence"},
         "all_models_failed": {"run_id": "R1"},
