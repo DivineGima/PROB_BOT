@@ -1,0 +1,55 @@
+{
+  "$comment": "The one list of bot commands (architecture 3, section 6.10, ADR-052). Read by the Worker's registry (apps/bot/src/commands/registry.ts) and by scripts/set-webhook.mjs for Telegram's menu (setMyCommands). Every command is read-only. /start is an alias of /help and is not listed.",
+  "commands": [
+    {
+      "command": "status",
+      "args": "",
+      "description": "Health: model run, nightly steps, forecasts, alerts"
+    },
+    {
+      "command": "fixtures",
+      "args": "[today|tomorrow|YYYY-MM-DD]",
+      "description": "Fixtures with a stored forecast and their verdicts (no probabilities)"
+    },
+    {
+      "command": "logged",
+      "args": "[today|yesterday|YYYY-MM-DD]",
+      "description": "Predictions already logged for a date"
+    },
+    {
+      "command": "results",
+      "args": "[n]",
+      "description": "Latest settled predictions (default 10, at most 20)"
+    },
+    {
+      "command": "pending",
+      "args": "",
+      "description": "Logged predictions waiting for a result"
+    },
+    {
+      "command": "report",
+      "args": "",
+      "description": "The latest weekly report as text"
+    },
+    {
+      "command": "last",
+      "args": "",
+      "description": "What happened to the last upload"
+    },
+    {
+      "command": "team",
+      "args": "<name>",
+      "description": "A team's goals form and its next fixture's verdict"
+    },
+    {
+      "command": "alerts",
+      "args": "",
+      "description": "Alerts of the last 48 hours"
+    },
+    {
+      "command": "help",
+      "args": "",
+      "description": "The list of commands"
+    }
+  ]
+}
