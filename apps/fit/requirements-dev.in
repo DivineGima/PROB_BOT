@@ -3,4 +3,4 @@ pytest==9.1.1
 ruff==0.17.5
 mypy==2.4.0
 types-requests==2.33.0.20261006
-hypothesis==6.152.5
+hypothesis==6.170.15
