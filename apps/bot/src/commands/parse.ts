@@ -46,10 +46,10 @@ export function cleanArgs(text: string): string {
 
 export function parseCommand(text: string): ParsedCommand {
   if (!isCommandText(text)) return { kind: "unknown" };
-  const match = /^\S+/.exec(text);
+  const match = text.match(/^\S+/);
   const rawToken = match?.[0] ?? "";
   const token = (rawToken.split("@")[0] ?? "").toLowerCase();
-  const found = TOKEN.exec(token);
+  const found = token.match(TOKEN);
   if (!found?.[1]) return { kind: "unknown" };
   const word = found[1];
   const name = COMMAND_ALIASES[word] ?? (isCommandName(word) ? word : null);
@@ -64,7 +64,7 @@ const isoDate = (d: Date): string => d.toISOString().slice(0, 10);
 
 /** True for a real calendar date written as `YYYY-MM-DD`. */
 export function isCalendarDate(text: string): boolean {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  const m = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return false;
   const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
   const date = new Date(Date.UTC(y, mo - 1, d));
