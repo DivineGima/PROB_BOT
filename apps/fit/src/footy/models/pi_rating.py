@@ -68,13 +68,13 @@ class PiParams:
         }
 
 
-def expected_goal_difference(rating: float, params: PiParams = PiParams()) -> float:  # noqa: B008
+def expected_goal_difference(rating: float, params: PiParams = PiParams()) -> float:
     """``g(R)``: the expected goal difference against the average opponent."""
     magnitude = float(params.base ** (abs(rating) / params.scale)) - 1.0
     return magnitude if rating >= 0 else -magnitude
 
 
-def weighted_error(error: float, params: PiParams = PiParams()) -> float:  # noqa: B008
+def weighted_error(error: float, params: PiParams = PiParams()) -> float:
     """``psi(e) = c * log10(1 + e)``."""
     return params.scale * math.log10(1.0 + error)
 
