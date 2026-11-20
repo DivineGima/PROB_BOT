@@ -620,3 +620,15 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 - **Backup:** manual run of `backup` (run 39084262728) green in 27 s; export 4.6 MB, so the nightly D1 token is allowed to export; artifact `prob-bot-d1-export` kept 30 days.
 - **Restore drill (done by Claude Code with Divine's go-ahead):** downloaded that artifact, created the scratch database `prob-bot-restore-test`, loaded `prob-bot.sql` into it (81,591 rows written, 18 tables) and compared it with the live database: matches 9,280, teams 238, predictions 16, forecasts 98, model runs 4, events 42, migrations 7, and the same active run (`R20261018T004052Z`) in both. The scratch database and the downloaded file were then deleted. The live database was only read.
 - **Go-live checklist (docs/runbook.md section 8):** done: nightly run by hand green, backup run by hand green, restore drill. Still Divine's: set variable `NIGHTLY_ENABLED` to `true` (Settings, Secrets and variables, Actions, tab Variables), seven green nights, a real upload with `score` and the weekly `report` seen once, the decision on the 16 test predictions, the token-rotation drill.
+
+---
+
+## 2026-11-21 - Why the workflows failed (Oct 25 - Nov 20); CI time-bomb test fixed
+
+- **Built against:** `PRD_2.md`, `system_architecture_2.md`, `system_architecture_essential_2.md` Stage 7 (all N=2). Branch `fix/alert-flush-test-clock`. Test-only change; no production code, schema or workflow touched.
+- **Finding 1 (not code): Actions blocked by GitHub billing, 2026-10-25 to 2026-10-31.** Seven `nightly` runs and the 2026-10-25 `backup` ended in 2 s with no step run; the run annotation reads "The job was not started because recent account payments have failed or your spending limit needs to be increased". The active run aged past the 36 h limit, so the bot showed STALE MODELS. Cleared on 2026-11-01 (new billing month). This repo used about 90 Actions minutes in October, so the limit was spent account-wide or a payment failed. Divine to check Settings, Billing and plans. It can recur at any month's end.
+- **Finding 2 (fixed): every Dependabot PR (#29 - #38) failed CI since 2026-11-01** on `test_alert_flush_sends_the_pending_alerts_once`. The test stamped its alert `2026-10-18T01:00:00Z`, but `alert --flush` reads the real clock (`cli.py`) and sends only alerts from the last `ALERT_FLUSH_HOURS` (48 h), so from 2026-10-20 the alert was "stale" and the test failed. The test now stamps the alert with `footy.clock.utc_now()`. Production behaviour was correct throughout.
+- **Health:** `nightly` green every day 2026-11-01 to 2026-11-20 (ingest, fit with all three models, gate passed, promoted, health check healthy).
+- **Checks:** Python 606 tests pass, ruff and mypy clean.
+- **Module status:** alerts `complete` (unchanged); CI `complete`.
+- **Open:** Divine's billing check; rebase and review the ten Dependabot PRs; the earlier open items.

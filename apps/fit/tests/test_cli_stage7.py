@@ -9,6 +9,7 @@ import pytest
 
 from footy.alerts import raise_alert
 from footy.cli import build_parser, main
+from footy.clock import utc_now
 from footy.config import Settings
 from footy.repo.ops import OpsRepo
 from footy.telegram import TelegramSender
@@ -80,7 +81,8 @@ def test_healthcheck_reports_each_check_and_exits_one_when_unhealthy(
 
 def test_alert_flush_sends_the_pending_alerts_once(capsys: pytest.CaptureFixture[str]) -> None:
     db = SqliteD1()
-    raise_alert(OpsRepo(db), "2026-10-18T01:00:00Z", "a", "all_models_failed", {"run_id": "R9"})
+    # stamped now: the flush sends only alerts from the last ALERT_FLUSH_HOURS by the real clock
+    raise_alert(OpsRepo(db), utc_now(), "a", "all_models_failed", {"run_id": "R9"})
     session = RecordingSession()
     code, out = run(["alert", "--flush"], capsys, env=TG_ENV, db=db, session=session)
     assert code == 0 and out["alerts"] == 1 and out["messages"] == 1
