@@ -211,6 +211,38 @@ describe("runWatchdog", () => {
     expect(fake.calls).toEqual([]);
   });
 
+  it("closes a stuck upload as failed once its alert was sent, so it is reported only once", async () => {
+    await seedRun({ activatedAt: FRESH });
+    await receivedUpload(1, "2026-10-18T01:49:00Z"); // stuck (11 min)
+    await receivedUpload(2, "2026-10-18T01:55:00Z"); // still in time (5 min)
+    const [d, fake] = deps();
+    expect((await runWatchdog(d)).sent).toBe(1);
+    expect(fake.sent).toHaveLength(1);
+    expect(
+      await count("uploads", "update_id = 1 AND status = 'failed' AND error_code = 'E_INTERNAL'"),
+    ).toBe(1);
+    expect(await count("uploads", "update_id = 2 AND status = 'received'")).toBe(1);
+
+    // A day later the closed upload is not reported again; only upload 2 (now stuck itself) is.
+    const later = new Date(NOW.getTime() + 25 * 3_600_000);
+    const stuck = (
+      await collectFindings(
+        createRepositories(env.DB, () => later),
+        later,
+      )
+    ).find((f) => f.key === "stuck_upload");
+    expect(stuck?.text.startsWith("1 upload(s)")).toBe(true);
+    expect(stuck?.text).toContain("2026-10-18T01:55:00Z");
+  });
+
+  it("leaves a stuck upload open when its alert could not be sent", async () => {
+    await seedRun({ activatedAt: FRESH });
+    await receivedUpload(1, "2026-10-18T01:49:00Z");
+    const [d] = deps({}, fakeTelegram({ failSendFrom: 1 }));
+    expect((await runWatchdog(d)).failed).toBe(1);
+    expect(await count("uploads", "update_id = 1 AND status = 'received'")).toBe(1);
+  });
+
   it("sends several findings as separate messages", async () => {
     await seedRun({ activatedAt: "2026-10-16T13:00:00Z" });
     await scheduledMatch(TODAY, 1, 2);

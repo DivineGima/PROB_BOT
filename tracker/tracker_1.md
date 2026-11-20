@@ -632,3 +632,17 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 - **Checks:** Python 606 tests pass, ruff and mypy clean.
 - **Module status:** alerts `complete` (unchanged); CI `complete`.
 - **Open:** Divine's billing check; rebase and review the ten Dependabot PRs; the earlier open items.
+
+---
+
+## 2026-11-21 (code review) - Whole-project review: two fixes, one doc correction
+
+- **Built against:** `PRD_2.md`, `system_architecture_2.md`, `system_architecture_essential_2.md` Stage 7 (all N=2). Branch `fix/review-2026-11-21`.
+- **Review:** `/code-review` (high) over the whole project, then every finding checked by hand against the code, the architecture and this tracker. The probability code was also read line by line: Dixon-Coles tau and its gradients, the bivariate Poisson convolution, the pi-rating update (Constantinou and Fenton 2013) and its scale fit, the over lines and total-goals pmf, the ensemble softmax and shrinkage with the aligned RPS history, and RPS with the 1/(r-1) normalisation. **No error found; nothing changed there.** No security or duplication finding.
+- **Fixed 1 (watchdog):** an upload stuck in `received` was never closed, so the watchdog alerted every day and the nightly health check failed every night until the row was fixed by hand. After its alert is accepted, the watchdog now closes those uploads as `failed` (`E_INTERNAL`); if the alert cannot be sent they stay open. Tests in `apps/bot/test/watchdog.test.ts` (shown to fail without the fix).
+- **Fixed 2 (publish):** `footy publish` without `--run-id` took the newest `building` run of any age. The 2026-11-20 nightly left one unpublished `building` run. On a night when every model fails, a leftover run 1 to 3 days old could pass the carry-over gate and go live with a fresh `activated_at`. Publish now refuses (exit 2) a `building` run that is not newer than the active run; `--run-id` still publishes it on purpose. Test in `apps/fit/tests/test_fit_publish.py` (shown to fail without the fix: the older run was promoted).
+- **Doc drift corrected:** architecture §9.2 alerts row said "messages of at most 20 alerts"; since PR 26 the limit is 20 lines and anomalies of one kind share a counted line. The `ALERT_MAX_LINES` comment said the rest are "counted, not listed"; they are sent in further messages. The §8.6 gate row, the §9.2 watchdog row and `docs/runbook.md` now describe fixes 1 and 2.
+- **Dismissed after checking (no change):** ingest exit 2 stopping the nightly (documented fail-closed, §9.3); the ignored `commit()` result (unreachable: one row per deduplicated update); the health check counting `alert_send_failed` (intentional, Stage 7 review item 1); the single Telegram retry (documented, §8); forecast horizon 4 versus ingest 3 (documented: the extra days cover a late nightly).
+- **Missing fields of earlier entries (append-only, so recorded here):** "2026-10-18 (first live nightly run)": module status alerts `complete`, nightly workflow `complete`. "2026-10-18 (backup and restore drill)": built against `PRD_2.md`, `system_architecture_2.md`, `system_architecture_essential_2.md` Stage 7; module status backup `complete`, restore drill `complete`.
+- **Module status:** watchdog `complete`; publish `complete`; alerts `complete` (unchanged).
+- **Open:** Dependabot PR #35 (@cloudflare/vitest-plugin) waits for a rebase; local `biome check` on Windows reports CRLF line endings (CI on Linux is clean); Divine's GitHub billing check; the earlier open items.

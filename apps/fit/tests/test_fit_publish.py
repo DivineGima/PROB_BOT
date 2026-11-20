@@ -317,6 +317,22 @@ def test_publish_with_nothing_to_publish_or_a_wrong_id_is_a_data_error(fitted: S
     assert run_publish_job(db, now=stamp(12)).exit_code == ExitCode.DATA  # no building run left
 
 
+def test_a_leftover_building_run_older_than_the_active_run_is_not_published(
+    fitted: SqliteD1,
+) -> None:
+    db = clone(fitted)  # R...01 is built and never published
+    newer = fit_again(db, 20)
+    assert run_publish_job(db, run_id=newer, now=stamp(21)).exit_code == ExitCode.OK
+    # A night whose fit failed: the only 'building' run left is the older, unpublished one.
+    result = run_publish_job(db, now=stamp(30))
+    assert result.exit_code == ExitCode.DATA
+    assert db.rows("SELECT run_id FROM active_run")[0]["run_id"] == newer
+    assert run_ids(db, "building") == ["R20260601T011701Z"]
+    # Publishing it on purpose still works.
+    again = run_publish_job(db, run_id="R20260601T011701Z", now=stamp(31))
+    assert again.exit_code == ExitCode.OK and again.summary["result"] == "promoted"
+
+
 def test_a_rejected_run_cannot_be_published_later(fitted: SqliteD1) -> None:
     db = clone(fitted)
     db.conn.execute("DELETE FROM team_form")

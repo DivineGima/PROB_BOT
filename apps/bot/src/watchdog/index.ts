@@ -5,6 +5,7 @@ import {
   WATCHDOG_FORECAST_DAYS,
 } from "../config/constants";
 import type { Env } from "../config/env";
+import { ERROR_CODES } from "../config/errors";
 import type { Repositories } from "../repo";
 import { type Sleep, type TelegramClient, telegramFromEnv } from "../telegram/client";
 
@@ -16,13 +17,17 @@ import { type Sleep, type TelegramClient, telegramFromEnv } from "../telegram/cl
  *
  * Each finding is sent to Divine once per 24 hours (an event with the key `alert:<key>` marks it).
  * The event is written only after Telegram accepted the message, so a failed send is retried at the
- * next run. Reads and one Telegram call per finding; nothing else.
+ * next run. Reads and one Telegram call per finding. The one write besides the events: once the
+ * stuck-upload alert was accepted, those uploads are closed as `failed` (E_INTERNAL), so a single
+ * silent upload is reported once instead of every day and no longer fails the nightly health check.
  */
 
 export interface Finding {
   key: string;
   kind: string;
   text: string;
+  /** Uploads to close as failed once this finding was sent (the stuck-upload finding only). */
+  closeUploads?: number[];
 }
 
 export interface WatchdogDeps {
@@ -100,6 +105,7 @@ export async function collectFindings(repos: Repositories, now: Date): Promise<F
       key: "stuck_upload",
       kind: "watchdog_stuck_upload",
       text: `${stuck.length} upload(s) were acknowledged but never answered (oldest received ${stuck[0]?.receivedAt}). Send the file again.`,
+      closeUploads: stuck.map((u) => u.uploadId),
     });
   }
   return findings;
@@ -164,6 +170,12 @@ export async function runWatchdog(deps: WatchdogDeps): Promise<WatchdogOutcome> 
         dedupeKey,
       });
       outcome.sent++;
+      for (const uploadId of finding.closeUploads ?? []) {
+        // Guarded by status = 'received': an upload that finished meanwhile is left as it is.
+        await repos.uploads
+          .finalise(uploadId, { status: "failed", errorCode: ERROR_CODES.E_INTERNAL })
+          .catch(() => false);
+      }
     } catch {
       outcome.failed++;
     }

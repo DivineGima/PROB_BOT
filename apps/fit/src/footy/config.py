@@ -72,7 +72,7 @@ BACKTEST_REGRESSION_TOLERANCE = 0.003  # RPS rise versus the previous comparable
 REPORT_TARGET_SCORED = 300  # PRD success metric: at least this many scored predictions
 NO_RESULT_DAYS = 3  # a pending prediction with no result this long after kickoff is void (ADR-028)
 ALERT_FLUSH_HOURS = 48  # an undelivered alert older than this is stale news and is not sent
-ALERT_MAX_LINES = 20  # alerts in one Telegram message; the rest are counted, not listed
+ALERT_MAX_LINES = 20  # lines in one Telegram message; more alerts go in further messages
 STUCK_UPLOAD_MINUTES = 10  # an upload still 'received' this long is stuck (ADR-029)
 HEALTH_FORECAST_DAYS = 2  # the health check wants forecasts for today and the next day
 

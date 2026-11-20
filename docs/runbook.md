@@ -30,7 +30,7 @@ The schedule of `nightly` does nothing until you set the repository variable **N
 | Every model failed | No new run | Re-run `fit` then `publish` (data workflow). If it repeats, tell Claude |
 | No model run is published / run is N h old | The bot may show STALE MODELS or nothing | Run nightly by hand. If the schedule never started, check NIGHTLY_ENABLED and https://github.com/DivineGima/PROB_BOT/actions |
 | No forecasts are stored for a day | Every match would be `NO_FORECAST` | Run `ingest`, `fit`, `publish` from the data workflow |
-| Upload(s) acknowledged but never answered | The Worker was cut off | Send the file again; it is safe (a repeat is reported as already logged) |
+| Upload(s) acknowledged but never answered | The Worker was cut off | Send the file again; it is safe (a repeat is reported as already logged). The watchdog closes the stuck upload as `failed` after this alert, so it is reported once |
 | Health check `bot_token` failed | In the last 24 h the Worker could not reply or alert: bot token missing or refused, unusable chat id, or a watchdog crash | Re-enter the token and check `ALLOWED_CHAT_ID` (section 5). The alert clears by itself 24 h after the cause is fixed |
 | Unmapped team / team missing from the canonical list | A club name is unknown | Add an alias or the team (ask Claude); until then its matches are skipped |
 

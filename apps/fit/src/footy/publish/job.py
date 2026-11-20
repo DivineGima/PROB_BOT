@@ -145,6 +145,20 @@ def _publish(
             if run_id
             else "no 'building' run to publish: run `footy fit`"
         )
+    if not run_id:
+        # A leftover 'building' run that is older than the active one (a fit never published) must
+        # not replace it on a night when tonight's fit failed: older parameters would go live with a
+        # fresh activated_at. Promoting an older run is still possible on purpose with --run-id.
+        current_id = registry.active_run_id()
+        current = registry.get_run(current_id) if current_id else None
+        if current is not None and (run.started_at, run.run_id) <= (
+            current.started_at,
+            current.run_id,
+        ):
+            raise DataError(
+                f"the newest 'building' run {run.run_id} is older than the active run "
+                f"{current.run_id}: run `footy fit`, or pass --run-id to publish it on purpose"
+            )
     summary["run_id"] = run.run_id
     if run.status == STATUS_ACTIVE and registry.active_run_id() == run.run_id:
         summary["result"] = "already active"
