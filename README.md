@@ -54,7 +54,9 @@ Two programs, one small database:
 - **Alerts:** if the nightly job fails, the numbers go stale, forecasts are missing or an upload gets no
   reply, you get a Telegram message.
 
-Design details: [system_architecture/system_architecture_2.md](system_architecture/system_architecture_2.md).
+Design details: [system_architecture/system_architecture_3.md](system_architecture/system_architecture_3.md).
+
+**Planned (version 3, not built yet):** read-only bot commands (`/status`, `/fixtures`, `/logged`, `/results`, `/pending`, `/report`, `/last`, `/team`, `/alerts`, `/help`). Until Stage 8 is built, any text message still gets the one-line usage hint.
 
 ## Using it every day
 
@@ -232,9 +234,10 @@ Names only; the values live in GitHub (Settings, Secrets) or Cloudflare (`wrangl
 | [docs/runbook.md](docs/runbook.md) | Daily ritual, alert table, rollback, rotation and restore drills, go-live checklist |
 | [docs/setup.md](docs/setup.md) | First-time setup steps and the checklists for each stage |
 | [docs/verification.md](docs/verification.md) | What was measured live: CPU, reply time, backtests |
-| [prd/PRD_2.md](prd/PRD_2.md) | What the product must do and why |
-| [system_architecture/system_architecture_2.md](system_architecture/system_architecture_2.md) | How it is built, the decision log (ADRs), risks |
-| [essentials/system_architecture_essential_2.md](essentials/system_architecture_essential_2.md) | The build plan, stage by stage |
+| [prd/PRD_3.md](prd/PRD_3.md) | What the product must do and why |
+| [system_architecture/system_architecture_3.md](system_architecture/system_architecture_3.md) | How it is built, the decision log (ADRs), risks |
+| [essentials/system_architecture_essential_2.md](essentials/system_architecture_essential_2.md) | The build plan for Stages 5 to 7 (built) |
+| [essentials/system_architecture_essential_3.md](essentials/system_architecture_essential_3.md) | The build plan for Stage 8, the read-only bot commands (next) |
 | [tracker/](tracker/) | The dated log of what was built, tested and decided |
 
 ## Limits

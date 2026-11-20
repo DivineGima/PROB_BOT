@@ -646,3 +646,27 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 - **Missing fields of earlier entries (append-only, so recorded here):** "2026-10-18 (first live nightly run)": module status alerts `complete`, nightly workflow `complete`. "2026-10-18 (backup and restore drill)": built against `PRD_2.md`, `system_architecture_2.md`, `system_architecture_essential_2.md` Stage 7; module status backup `complete`, restore drill `complete`.
 - **Module status:** watchdog `complete`; publish `complete`; alerts `complete` (unchanged).
 - **Open:** Dependabot PR #35 (@cloudflare/vitest-plugin) waits for a rebase; local `biome check` on Windows reports CRLF line endings (CI on Linux is clean); Divine's GitHub billing check; the earlier open items.
+
+---
+
+## 2026-11-21 (version 3) - Read-only bot commands designed: PRD_3, architecture 3, essentials 3 (no code written)
+
+- **Built against:** `PRD_3.md`, `system_architecture_3.md`, `system_architecture_essential_3.md` (all N=3), written this session. Branch `feat/v3-bot-commands-docs`. Documents only; no code, schema, workflow or secret changed.
+- **Why a version 3 and not an edit of version 2:** architecture §1.4 and ADR-016 listed "bot commands beyond the upload flow" as out of scope, so adding them is a scope change. `claude.md` forbids editing an earlier version and requires PRD, architecture and essentials to share N. Version 2 already existed, so the new snapshot is 3. Divine asked for the documents in this session (an exception to "PRD and architecture changes are made in design chat", recorded in the revision lines of all three files, as essentials 2 did).
+- **Read order and drift checks (claude.md section 1):** before writing, the current files were PRD_2, architecture 2 and essentials 2; essentials 2 named architecture 2, and architecture 2 was derived from PRD_2, so there was no drift. After writing: essentials 3 names `system_architecture_3.md` and `PRD_3.md`; architecture 3 says `Derived From: PRD_3.md`; the highest N in `/prd/`, `/system_architecture/` and `/essentials/` is 3 in all three. The changelogs of PRD_3 and architecture 3 both say `IMPACT`, and essentials 3 is the follow-up they name.
+- **Decisions by Divine (2026-11-21):** all ten commands: `/help` (also `/start`), `/status`, `/fixtures`, `/logged`, `/results`, `/pending`, `/report`, `/last`, `/team`, `/alerts`. `/fixtures` shows verdicts only, never probabilities (ADR-050). The state-changing commands (`/rerun`, `/rollback`, `/publish`, `/void`) were recommended against and are not built (ADR-051).
+- **Design in short (architecture §6.10, §8.12):** a new Worker module `commands/` over a read-only `QueryRepository` (`SELECT` only); `/status` reuses the watchdog's `collectFindings`; no migration; no new secret (`deploy.yml` reads the existing `TELEGRAM_CHAT_ID` for the menu scope); Telegram menu by `setMyCommands`, scoped to the allowed chat (ADR-052); new invariant 9 (the command path writes only `processed_updates` and `command_failed`); threats S15 to S17; risks R-P13, R-O8, R-M9; ADR-049 to ADR-052. Two rules that exist in both languages (the alert predicate and the team-name normaliser) are pinned by a repository check and shared vectors.
+- **Also changed:** `README.md` links the version-3 files and says the commands are planned, not built.
+- **Checked against the code before writing:** the text-message branch in `apps/bot/src/index.ts` (where commands plug in); `processed_updates.kind` has no CHECK (a new value `command` needs no migration); `collectFindings` is pure over the repositories; watchdog findings are recorded as `error` events only after delivery (so `/alerts` lists them as "sent by watchdog"); the flush predicate in `OpsRepo.pending_alerts`; the `metrics_json` keys written by `report/metrics.py`; the job kinds in `job_runs`; only `fd_org` aliases exist in `data/aliases/`.
+
+### Module status
+| Module | Status |
+|---|---|
+| Stages 1 to 7 | **complete** (unchanged) |
+| Version-3 documents (PRD_3, architecture 3, essentials 3) | **complete**, waiting for Divine's review and merge |
+| Stage 8: read-only bot commands | not started (next, after the documents are merged) |
+
+### Open issues
+1. Divine reviews and merges the documents pull request; Stage 8 starts only after that.
+2. Stage 8 step 9 needs Divine's phone and a second Telegram account (menu not shown, stranger gets no reply).
+3. Carried over: Divine's GitHub billing check; PR #3 (TypeScript 7) waits for a Dependabot rebase; local `biome check` on Windows reports CRLF; the earlier open items (`claude.md` in-place-edit wording, missing design-rules file, git identity).
