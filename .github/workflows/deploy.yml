@@ -64,6 +64,8 @@ jobs:
           WEBHOOK_PATH_SECRET: ${{ secrets.WEBHOOK_PATH_SECRET }}
           TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          # [v3, ADR-052] menu scope only: the command menu is shown in this chat alone.
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: node scripts/set-webhook.mjs
 
       - name: Post-deploy smoke
