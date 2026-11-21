@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from footy.config import REPORT_TARGET_SCORED
+from footy.report.display import display, filled_cells
 from footy.report.metrics import finite, largest_calibration_gap
 
 TOO_FEW = 30  # below this the report says the numbers mean nothing yet
@@ -59,13 +60,55 @@ def verdict(metrics: Mapping[str, Any]) -> str:
     )
 
 
+def progress_bar(fraction: float) -> str:
+    """[v4] ``🟩🟩⬜⬜⬜⬜⬜⬜⬜⬜`` with the display contract's cells (ADR-056)."""
+    bar = display()["bar"]
+    n = filled_cells(fraction)
+    return str(bar["home"]) * n + str(bar["empty"]) * (int(bar["cells"]) - n)
+
+
+def _hit_text(entry: Mapping[str, Any]) -> str:
+    n, hits = entry.get("n"), entry.get("hits")
+    if not isinstance(n, int) or not isinstance(hits, int) or n == 0:
+        return "n/a"
+    return f"{hits} of {n} ({hits / n:.0%})"
+
+
+def plain_lines(metrics: Mapping[str, Any]) -> list[str]:
+    """[v4] The strongest call, the favourite by confidence and goals, in plain words."""
+    out: list[str] = []
+    strongest = metrics.get("strongest") or {}
+    if strongest.get("n"):
+        said = finite(strongest.get("mean_forecast"))
+        out += [
+            "",
+            f"⭐ Strongest calls right: {_hit_text(strongest)}"
+            + (f"; the bot said {said:.0%} on average." if said is not None else "."),
+        ]
+    fav = metrics.get("favourite") or {}
+    if fav.get("n"):
+        bands = fav.get("by_band") or {}
+        out += [
+            f"👉 Favourite (most likely result) right: {_hit_text(fav)}.",
+            f"   💪 60%+: {_hit_text(bands.get('clear') or {})} · "
+            f"👍 50-60%: {_hit_text(bands.get('slight') or {})} · "
+            f"🤷 under 50%: {_hit_text(bands.get('open') or {})}",
+        ]
+    goals = metrics.get("goals") or {}
+    expected, actual = finite(goals.get("expected")), finite(goals.get("actual"))
+    if expected is not None and actual is not None:
+        out.append(f"⚽ Goals per match: expected {expected:.2f}, actual {actual:.2f}.")
+    return out
+
+
 def render_text(metrics: Mapping[str, Any], today: str) -> str:
     n = int(metrics.get("n_scored", 0))
     target = int(metrics.get("target", REPORT_TARGET_SCORED))
     pending = int(metrics.get("n_pending", 0))
     lines = [
-        f"Weekly report {today}",
-        f"Scored predictions: {n} of the {target} needed ({n / target:.0%}); {pending} pending.",
+        f"📊 Weekly report {today}",
+        f"📈 {progress_bar(n / target)} Scored predictions: {n} of the {target} needed "
+        f"({n / target:.0%}); {pending} pending.",
     ]
 
     ensemble = metrics.get("ensemble")
@@ -77,6 +120,14 @@ def render_text(metrics: Mapping[str, Any], today: str) -> str:
                 f" (95% interval {_signed(paired.get('ci_low'))} "
                 f"to {_signed(paired.get('ci_high'))})"
             )
+        diff, base = finite(paired.get("mean_diff_rps_1x2")), finite(paired.get("baseline_rps_1x2"))
+        if diff is not None and base:
+            better = -diff / base
+            lines += [
+                "",
+                f"🏆 Bot vs simple benchmark: the bot is {abs(better):.0%} "
+                f"{'better' if better >= 0 else 'worse'} (accuracy grade, lower is better).",
+            ]
         lines += [
             "",
             "Ensemble against the league-frequency baseline "
@@ -89,6 +140,7 @@ def render_text(metrics: Mapping[str, Any], today: str) -> str:
             f"  Log loss 1X2 {_fmt(ensemble.get('logloss_1x2'))}",
         ]
     lines += ["", verdict(metrics)]
+    lines += plain_lines(metrics)
 
     by_model = metrics.get("by_model") or {}
     if by_model:

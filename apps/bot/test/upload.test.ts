@@ -100,10 +100,12 @@ describe("a valid upload", () => {
     expect(await count("omissions")).toBe(0);
     const text = allText(tg);
     expect(text).toContain("Club 1 vs Club 2");
-    expect(text).toContain("H 50.0%  D 25.0%  A 25.0%");
-    expect(text).toContain("H 60.0%");
+    expect(text).toContain("🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜ 50% 🏠 Club 1");
+    expect(text).toContain("🟨🟨🟨⬜⬜⬜⬜⬜⬜⬜ 25% 🤝 Draw");
+    expect(text).toContain("60% 🏠 Club 3");
+    expect(text).toContain("⭐ Strongest call:");
     expect(text).toContain("17 Oct 15:00 UTC (20:30 IST)");
-    expect(text).toContain("Models dc+pi+bp   w 0.40/0.30/0.30");
+    expect(text).toContain("models dc 0.40 / pi 0.30 / bp 0.30");
     expect(text).toContain(`Run ${RUN_ID} (results to 2026-10-16)`);
     expect(text).toContain(
       "Published 3; omitted 0; excluded by the screener 3 (G2 1, G4 1, OTHER 1)",
@@ -319,8 +321,8 @@ describe("the first prediction per fixture is immutable (GR-13)", () => {
     ).all();
     expect(after.results).toEqual(before.results);
     expect(allText(second).match(/\[already logged\]/g)).toHaveLength(3);
-    expect(allText(second)).toContain("H 50.0%");
-    expect(allText(second)).not.toContain("H 90.0%");
+    expect(allText(second)).toContain("50% 🏠 Club 1");
+    expect(allText(second)).not.toContain("90% 🏠");
     expect(allText(first)).not.toContain("already logged");
     const uploads = await env.DB.prepare(
       "SELECT n_published, n_duplicate, status FROM uploads ORDER BY upload_id",
@@ -358,9 +360,9 @@ describe("the first prediction per fixture is immutable (GR-13)", () => {
     expect(await count("predictions")).toBe(3);
     expect(await count("uploads", "status = 'processed'")).toBe(2);
     for (const tg of [a, b]) {
-      expect(allText(tg)).toContain("H 50.0%");
-      expect(allText(tg)).toContain("H 60.0%");
-      expect(allText(tg)).toContain("H 40.0%");
+      expect(allText(tg)).toContain("50% 🏠 Club 1");
+      expect(allText(tg)).toContain("60% 🏠 Club 3");
+      expect(allText(tg)).toContain("40% 🏠 Club 5");
     }
     // each stored fixture was created by exactly one upload: the other one reports it as logged
     const flagged = (allText(a) + allText(b)).match(/\[already logged\]/g) ?? [];
@@ -576,7 +578,7 @@ describe("failures after the acknowledgement", () => {
     const retry = withFile(screenerFile(threeMatches()));
     await deliver(documentUpdate(2), { tg: retry });
     expect(allText(retry).match(/\[already logged\]/g)).toHaveLength(3);
-    expect(allText(retry)).toContain("H 60.0%");
+    expect(allText(retry)).toContain("60% 🏠 Club 3");
   });
 
   it("waits out a short 429 from Telegram and still delivers", async () => {

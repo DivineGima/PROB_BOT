@@ -79,6 +79,10 @@ If the repository ever becomes public, the Worker watchdog still alerts when the
 From the data workflow run `report`: it sends through the same Telegram sender as the alerts, so a message arriving proves the path.
 The watchdog sends only when something is wrong; to see it once, ask Claude to trigger it with a test finding.
 
+## 9b. Daily results picture (version 4)
+
+The nightly step "Daily results picture" (`footy digest --send`, after Publish) sends one picture per 12 matches graded since the last one; nothing new means no message. If it fails (Telegram down), the nightly job is marked failed and the alert says so; the same matches are sent the next night, nothing is lost. Run it by hand from the data workflow is not needed: the next nightly retries.
+
 ## 10. Bot commands (version 3)
 
 Send these in the bot chat at any time. They only **read** what is stored: none of them logs a prediction, starts

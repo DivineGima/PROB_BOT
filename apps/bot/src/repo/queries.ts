@@ -139,6 +139,8 @@ export interface SettledRow {
   voidReason: string | null;
   goals: [number, number] | null;
   p1x2: [number, number, number];
+  /** [v4] P(over 0.5) .. P(over 5.5), for the strongest call (ADR-057). */
+  overs: number[];
   rps1x2: number | null;
 }
 
@@ -427,7 +429,8 @@ export function createQueries(db: D1Database): QueryRepository {
       const { results } = await db
         .prepare(
           `SELECT p.comp_code, p.match_date, p.status, p.void_reason, p.goals_home, p.goals_away,
-             p.p_home, p.p_draw, p.p_away, p.rps_1x2,
+             p.p_home, p.p_draw, p.p_away, p.p_over_05, p.p_over_15, p.p_over_25, p.p_over_35,
+             p.p_over_45, p.p_over_55, p.rps_1x2,
              h.canonical_name AS home, a.canonical_name AS away
            FROM predictions p ${TEAM_NAMES}
            WHERE p.status IN ('scored', 'void')
@@ -444,6 +447,9 @@ export function createQueries(db: D1Database): QueryRepository {
         voidReason: str(r.void_reason),
         goals: goalsOf(r),
         p1x2: [Number(r.p_home), Number(r.p_draw), Number(r.p_away)],
+        overs: [r.p_over_05, r.p_over_15, r.p_over_25, r.p_over_35, r.p_over_45, r.p_over_55].map(
+          Number,
+        ),
         rps1x2: num(r.rps_1x2),
       }));
     },

@@ -1,5 +1,16 @@
 import { MAX_REPLY_CHARS } from "../config/constants";
 import type { OmissionCode } from "../config/errors";
+import {
+  bar,
+  callText,
+  DISPLAY,
+  favouriteLabel,
+  favouriteOf,
+  OUTCOME_ICON,
+  omissionIcon,
+  pct0,
+  strongestCall,
+} from "./display";
 
 /**
  * Reply rendering (architecture section 8.8). Pure functions: plain text, one block per match, UTC
@@ -78,15 +89,33 @@ export function formatKickoff(kickoffUtc: string): string {
   return `${utcPart} (${istPart})`;
 }
 
-const pct = (p: number): string => (p * 100).toFixed(1);
-
+/**
+ * [v4] One match as a visual card (architecture 4, section 8.8, ADR-053): emoji bars first so they
+ * line up on any font, the most likely result with its label, the strongest call (ADR-057) and the
+ * goal lines. Plain text, no parse mode.
+ */
 export function renderMatch(m: PublishedMatch): string {
-  const [home, draw, away] = m.p1x2;
+  const home = clean(m.home);
+  const away = clean(m.away);
+  const [pHome, pDraw, pAway] = m.p1x2;
+  const fav = favouriteOf(m.p1x2);
+  const favName = fav.outcome === "home" ? home : fav.outcome === "away" ? away : "Draw";
+  const call = strongestCall(m.p1x2, m.overs);
+  const over = (i: number): number => m.overs[i] ?? Number.NaN;
   const lines = [
-    `${clean(m.comp, 4)}  ${clean(m.home)} vs ${clean(m.away)}   ${formatKickoff(m.kickoffUtc)}${m.alreadyLogged ? "  [already logged]" : ""}`,
-    `1X2   H ${pct(home)}%  D ${pct(draw)}%  A ${pct(away)}%`,
-    `Over  ${m.overs.map((p, i) => `${i + 0.5} ${pct(p)}`).join(" | ")}   (Under = 100 - Over)`,
-    `Models ${m.weights.map(([name]) => name).join("+")}   w ${m.weights.map(([, w]) => w.toFixed(2)).join("/")}   Drift: stable (goals only)`,
+    `⚽ ${clean(m.comp, 4)} · ${home} vs ${away}${m.alreadyLogged ? "  🔁 [already logged]" : ""}`,
+    `🕐 ${formatKickoff(m.kickoffUtc)}`,
+    "",
+    `${bar(pHome, DISPLAY.bar.home)} ${pct0(pHome)} ${OUTCOME_ICON.home} ${home}`,
+    `${bar(pDraw, DISPLAY.bar.draw)} ${pct0(pDraw)} ${OUTCOME_ICON.draw} Draw`,
+    `${bar(pAway, DISPLAY.bar.away)} ${pct0(pAway)} ${OUTCOME_ICON.away} ${away}`,
+    `👉 Most likely result: ${favName} (${pct0(fav.p)}) · ${favouriteLabel(fav.p)}`,
+    `⭐ Strongest call: ${callText(call.key, home, away)}, ${pct0(call.p)}`,
+    "",
+    "Goals, chance of MORE than:",
+    ...[1, 2, 3].map((i) => `${bar(over(i), DISPLAY.bar.goals)} ${pct0(over(i))}  ${i + 0.5}`),
+    `0.5: ${pct0(over(0))} · 4.5: ${pct0(over(4))} · 5.5: ${pct0(over(5))}  (under = 100 - over)`,
+    `📈 Form stable ✅ · models ${m.weights.map(([name, w]) => `${name} ${w.toFixed(2)}`).join(" / ")}`,
   ];
   return lines.join("\n");
 }
@@ -105,7 +134,7 @@ const REASON_TEXT: Record<OmissionCode, string> = {
 
 export function renderOmission(o: OmittedMatch): string {
   const note = o.note ? ` (${clean(o.note, 80)})` : "";
-  return `- ${clean(o.comp, 4)} ${clean(o.home)} vs ${clean(o.away)}: ${o.reason}, ${REASON_TEXT[o.reason]}${note}`;
+  return `${omissionIcon(o.reason)} ${clean(o.comp, 4)} ${clean(o.home)} vs ${clean(o.away)}: ${o.reason}, ${REASON_TEXT[o.reason]}${note}`;
 }
 
 function countsText(counts: Record<string, number>): string {
@@ -120,19 +149,24 @@ function footer(input: ReplyInput): string {
   for (const o of input.omitted) omittedCounts[o.reason] = (omittedCounts[o.reason] ?? 0) + 1;
   const nExcluded = Object.values(input.excluded).reduce((sum, n) => sum + n, 0);
   const lines = [
-    `Run ${input.runId}${input.dataCutoff ? ` (results to ${input.dataCutoff.slice(0, 10)})` : ""}`,
-    `Published ${input.published.length}; omitted ${input.omitted.length}${
+    `📦 Published ${input.published.length}; omitted ${input.omitted.length}${
       input.omitted.length ? ` (${countsText(omittedCounts)})` : ""
     }; excluded by the screener ${nExcluded}${nExcluded ? ` (${countsText(input.excluded)})` : ""}`,
+    `🧠 Run ${input.runId}${input.dataCutoff ? ` (results to ${input.dataCutoff.slice(0, 10)})` : ""}`,
   ];
-  lines.push(...input.banners);
+  lines.push(...input.banners.map((b) => `⚠️ ${b}`));
   if (input.hasUcl) {
     lines.push(
-      "UCL: cross-league strength is the weakest-identified quantity; the final may be at a neutral ground.",
+      "🏆 UCL: cross-league strength is the weakest-identified quantity; the final may be at a neutral ground.",
+    );
+  }
+  if (input.published.length > 0) {
+    lines.push(
+      "⭐ Strongest call = the one outcome the bot is most sure of (result, or over/under 1.5 to 3.5 goals). Most likely is not the same as a good bet.",
     );
   }
   lines.push(
-    "Drift: goals only; thresholds are starting values, unvalidated. Probabilities, not advice.",
+    "ℹ️ Drift: goals only; thresholds are starting values, unvalidated. Probabilities, not advice.",
   );
   return lines.join("\n");
 }
@@ -186,10 +220,14 @@ export function renderReply(input: ReplyInput): string[] {
       footer(input),
     ]);
   }
-  const blocks: string[] = [`Probabilities for ${input.runDateUtc}`];
+  const blocks: string[] = [
+    `📊 Probabilities for ${input.runDateUtc} · ${input.published.length} match${input.published.length === 1 ? "" : "es"}`,
+  ];
   for (const match of input.published) blocks.push(renderMatch(match));
   if (input.omitted.length > 0) {
-    blocks.push(...packLines(["Omitted:", ...input.omitted.map(renderOmission)]));
+    blocks.push(
+      ...packLines(["🚫 Omitted: (no numbers given)", ...input.omitted.map(renderOmission)]),
+    );
   }
   blocks.push(footer(input));
   return splitBlocks(blocks);

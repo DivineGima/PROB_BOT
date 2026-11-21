@@ -229,3 +229,11 @@ scoped to the allowed chat). The commands are live since deploy `0ca6e66`.
 | `/fixtures` matches the same day's upload; `/logged` matches that upload's reply | pending |
 | From another Telegram account: `/status` gets no reply and the menu is not shown | pending |
 | CPU (`cpuTime` in Workers Logs), at least 10 requests each of `/status`, `/fixtures`, `/team`, plus one after a quiet spell; reply time p95 at most 10 s | pending |
+
+### 8.x Stage 8 production check (2026-11-21)
+
+Divine sent each command in the real chat and did the second-account check (no reply, no menu). The `cpuTime` figures could not be read (the Cloudflare login has expired); they are carried into section 9.
+
+## 9. Version 4 production check (Stage 9 step 6, pending)
+
+To record after the merge: one real upload, each command once, the next morning's results picture, the Monday report, and `cpuTime` p95 of an upload and of `/status`, `/fixtures`, `/results` (plus Stage 8's commands). Needs `wrangler login` once.

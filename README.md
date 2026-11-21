@@ -7,8 +7,7 @@ you a weekly report.
 
 > Probabilities, not advice. The bot never tells you what to bet on.
 
-**Status:** Stages 1 to 7 are built, reviewed and deployed (see `tracker/`). The remaining steps are the
-go-live checks in [docs/runbook.md](docs/runbook.md), section 8.
+**Status:** Stages 1 to 8 are built and live. Version 4 (Stage 9: visual messages, the strongest call, the daily results picture) is built; its production check is in `tracker/tracker_4.md`. Remaining go-live checks: [docs/runbook.md](docs/runbook.md), section 8.
 
 ## Contents
 
@@ -93,6 +92,8 @@ Probabilities come only from an uploaded screener file. Which command to send fo
 [docs/runbook.md section 10](docs/runbook.md#10-bot-commands-version-3).
 
 ## Reading a reply
+
+**[v4] The visual card** (architecture 4, §21): one bar per result (🟩 home, 🟨 draw, 🟥 away) and per goal line (🟦), the most likely result with a label (💪 60%+, 👍 50-60%, 🤷 under 50%), and **⭐ the strongest call**: the one outcome the bot is most sure of among the result and over/under 1.5 to 3.5 goals. Most likely is not the same as a good bet. Every morning after matches are graded, a picture shows how the latest predictions did; on Mondays the weekly report comes as plain text plus a four-panel chart. The older text layout below is kept for reference.
 
 ```
 EPL  Leeds United vs Manchester United   18 Oct 13:00 UTC (18:30 IST)

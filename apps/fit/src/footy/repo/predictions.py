@@ -40,6 +40,24 @@ class ReportRow:
     logloss_1x2: float
 
 
+@dataclass(frozen=True)
+class DigestRow:
+    """[v4] A scored prediction for the daily results picture (ADR-054)."""
+
+    pred_id: int
+    comp_code: str
+    match_date: str
+    kickoff_utc: str
+    home: str
+    away: str
+    p1x2: tuple[float, float, float]
+    overs: tuple[float, ...]
+    goals_home: int
+    goals_away: int
+    rps_1x2: float
+    scored_at: str
+
+
 class PredictionsRepo:
     def __init__(self, db: Database) -> None:
         self._db = db
@@ -187,6 +205,40 @@ class PredictionsRepo:
             if len(rows) < PAGE_SIZE:
                 return out
             last_id = int(rows[-1]["pred_id"])
+
+    # -- [v4] the daily results picture (footy digest, ADR-054) ----------
+
+    def scored_after(self, after: str, limit: int) -> list[DigestRow]:
+        """Scored predictions with ``scored_at`` later than ``after``, oldest first, with team
+        names from our table. Read-only."""
+        rows = self._db.query(
+            "SELECT p.pred_id, p.comp_code, p.match_date, p.kickoff_utc, p.p_home, p.p_draw, "
+            "p.p_away, p.p_over_05, p.p_over_15, p.p_over_25, p.p_over_35, p.p_over_45, "
+            "p.p_over_55, p.goals_home, p.goals_away, p.rps_1x2, p.scored_at, "
+            "h.canonical_name AS home, a.canonical_name AS away "
+            "FROM predictions p JOIN teams h ON h.team_id = p.home_team_id "
+            "JOIN teams a ON a.team_id = p.away_team_id "
+            "WHERE p.status = 'scored' AND p.scored_at > ? "
+            "ORDER BY p.scored_at, p.kickoff_utc, p.pred_id LIMIT ?",
+            (after, limit),
+        )
+        return [
+            DigestRow(
+                pred_id=int(r["pred_id"]),
+                comp_code=str(r["comp_code"]),
+                match_date=str(r["match_date"]),
+                kickoff_utc=str(r["kickoff_utc"]),
+                home=str(r["home"]),
+                away=str(r["away"]),
+                p1x2=(float(r["p_home"]), float(r["p_draw"]), float(r["p_away"])),
+                overs=tuple(float(r[f"p_over_{k}"]) for k in ("05", "15", "25", "35", "45", "55")),
+                goals_home=int(r["goals_home"]),
+                goals_away=int(r["goals_away"]),
+                rps_1x2=float(r["rps_1x2"]),
+                scored_at=str(r["scored_at"]),
+            )
+            for r in rows
+        ]
 
     def omission_counts(self) -> dict[str, int]:
         """Omissions by reason over every processed upload."""
