@@ -30,6 +30,12 @@ export const DEFAULT_STALE_HOURS = 36;
 export const STUCK_UPLOAD_MINUTES = 10;
 /** The watchdog wants forecasts for today and the next day when fixtures are scheduled (ADR-015). */
 export const WATCHDOG_FORECAST_DAYS = 2;
+/** [v3] The nightly job forecasts today to today + this many days (`forecast.horizon_days`, section 8.11). */
+export const FORECAST_HORIZON_DAYS = 4;
+/** [v3] `/alerts` and the "alerts waiting" count of `/status` look back this far (the flush window). */
+export const COMMAND_ALERT_HOURS = 48;
+/** [v3] Alert-delivery problems count over this window (the nightly health check's window). */
+export const COMMAND_ALERT_PATH_HOURS = 24;
 /** At most this many validation paths are shown for a rejected file (section 6.3). */
 export const MAX_ERROR_PATHS = 5;
 

@@ -201,6 +201,8 @@ describe("classifyUpdate", () => {
   it("classifies document, text and other messages", () => {
     expect(classifyUpdate({ message: { document: { file_id: "a" } } })).toBe("document");
     expect(classifyUpdate({ message: { text: "hello" } })).toBe("text");
+    expect(classifyUpdate({ message: { text: "/status" } })).toBe("command");
+    expect(classifyUpdate({ message: { text: "hi /status" } })).toBe("text");
     expect(classifyUpdate({ message: { photo: [] } })).toBe("other");
     expect(classifyUpdate({})).toBe("other");
     expect(classifyUpdate(null)).toBe("other");

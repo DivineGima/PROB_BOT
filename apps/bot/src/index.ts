@@ -1,4 +1,6 @@
 import { checkSession, routeOf, verifyWebhook } from "./auth";
+import { type CommandOutcome, handleCommand } from "./commands";
+import { parseCommand } from "./commands/parse";
 import { MAX_UPDATE_BODY_BYTES } from "./config/constants";
 import type { Env } from "./config/env";
 import { ERROR_CODES } from "./config/errors";
@@ -6,7 +8,7 @@ import { logRequest } from "./config/log";
 import { createRepositories } from "./repo";
 import { handleSpike } from "./spike";
 import { type Sleep, telegramFromEnv } from "./telegram/client";
-import { classifyUpdate, extractDocument } from "./telegram/update";
+import { classifyUpdate, extractDocument, extractText } from "./telegram/update";
 import { handleDocument, sendUsageHint, type UploadOutcome } from "./upload";
 import { runWatchdog, type WatchdogOutcome, watchdogDeps } from "./watchdog";
 
@@ -125,7 +127,10 @@ async function handleTelegramUpdate(
   }
 }
 
-/** The work behind the acknowledgement: a document runs the upload pipeline, anything else gets the hint. */
+/**
+ * The work behind the acknowledgement: a document runs the upload pipeline, a text starting with `/`
+ * runs the read-only command router (architecture 3, section 6.10), anything else gets the hint.
+ */
 async function runPipeline(
   update: unknown,
   session: { updateId: number; chatId: number },
@@ -135,7 +140,7 @@ async function runPipeline(
   services: Services,
 ): Promise<void> {
   const started = Date.now();
-  let outcome: UploadOutcome;
+  let outcome: UploadOutcome | CommandOutcome;
   try {
     const deps = {
       repos,
@@ -143,10 +148,19 @@ async function runPipeline(
       now: services.now,
       newErrorId: services.newErrorId,
     };
-    const document = classifyUpdate(update) === "document" ? extractDocument(update) : null;
-    outcome = document
-      ? await handleDocument(deps, { updateId: session.updateId, chatId: session.chatId, document })
-      : await sendUsageHint(deps, session.chatId);
+    const kind = classifyUpdate(update);
+    const document = kind === "document" ? extractDocument(update) : null;
+    if (document) {
+      outcome = await handleDocument(deps, {
+        updateId: session.updateId,
+        chatId: session.chatId,
+        document,
+      });
+    } else if (kind === "command") {
+      outcome = await handleCommand(deps, session.chatId, parseCommand(extractText(update) ?? ""));
+    } else {
+      outcome = await sendUsageHint(deps, session.chatId);
+    }
   } catch {
     outcome = { outcome: "pipeline_crashed", errorCode: ERROR_CODES.E_INTERNAL };
   }
@@ -156,6 +170,7 @@ async function runPipeline(
     outcome: outcome.outcome,
     update_id: session.updateId,
     ...(outcome.errorCode ? { error_code: outcome.errorCode } : {}),
+    ...("command" in outcome && outcome.command ? { command: outcome.command } : {}),
     duration_ms: Date.now() - started,
     ...outcome.counts,
   });
