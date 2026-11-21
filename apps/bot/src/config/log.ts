@@ -9,6 +9,8 @@ export interface RequestLog {
   update_id?: number;
   error_code?: string;
   duration_ms?: number;
+  /** [v3] A KNOWN command name only; arguments are never logged (S15). */
+  command?: string;
   [extra: `n_${string}`]: number;
 }
 

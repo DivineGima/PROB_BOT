@@ -663,10 +663,12 @@ describe("failures after the acknowledgement", () => {
 });
 
 describe("non-document messages, strangers and replays", () => {
-  it("answers a text message from the allowed chat with the one-line usage hint and logs nothing", async () => {
+  it("answers a text message from the allowed chat with the usage hint and logs nothing", async () => {
     const tg = fakeTelegram();
     await deliver(textUpdate(1), { tg });
-    expect(tg.sent.map((m) => m.text)).toEqual(["Upload the screener .json file as a document."]);
+    expect(tg.sent.map((m) => m.text)).toEqual([
+      "Upload the screener .json file as a document.\nSend /help to see the commands.",
+    ]);
     expect(await count("uploads")).toBe(0);
   });
 

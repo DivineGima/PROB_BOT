@@ -2,7 +2,8 @@
  * Telegram update helpers that carry no secrets: the update kind for the `processed_updates` row
  * and the document fields of an upload. Sending and downloading live in `client.ts`.
  */
-export type UpdateKind = "document" | "text" | "other";
+/** [v3] `command`: a text whose first character is `/` (architecture 3, section 6.2). */
+export type UpdateKind = "document" | "command" | "text" | "other";
 
 export function classifyUpdate(update: unknown): UpdateKind {
   if (typeof update !== "object" || update === null) return "other";
@@ -10,8 +11,17 @@ export function classifyUpdate(update: unknown): UpdateKind {
   if (typeof message !== "object" || message === null) return "other";
   const fields = message as { document?: unknown; text?: unknown };
   if (typeof fields.document === "object" && fields.document !== null) return "document";
-  if (typeof fields.text === "string") return "text";
+  if (typeof fields.text === "string") return fields.text.startsWith("/") ? "command" : "text";
   return "other";
+}
+
+/** The text of a message (at most 4,096 characters, Telegram's own limit), or null. */
+export function extractText(update: unknown): string | null {
+  if (typeof update !== "object" || update === null) return null;
+  const message = (update as { message?: unknown }).message;
+  if (typeof message !== "object" || message === null) return null;
+  const value = (message as { text?: unknown }).text;
+  return typeof value === "string" ? value.slice(0, 4096) : null;
 }
 
 export interface DocumentFields {

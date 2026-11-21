@@ -206,7 +206,9 @@ export const ERROR_TEXT = {
   E_NO_RUN: "No usable model run — nothing computed.",
 } as const;
 
-export const USAGE_HINT = "Upload the screener .json file as a document.";
+/** [v3] The second line points to the commands (additive, architecture 3, section 6.3). */
+export const USAGE_HINT =
+  "Upload the screener .json file as a document.\nSend /help to see the commands.";
 
 export function renderError(code: keyof typeof ERROR_TEXT, detail: string[] = []): string {
   const lines: string[] = [ERROR_TEXT[code]];

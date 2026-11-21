@@ -48,7 +48,8 @@ const HOUR_MS = 3_600_000;
 const isoDate = (d: Date): string => d.toISOString().slice(0, 10);
 const hourKey = (d: Date): string => d.toISOString().slice(0, 13);
 
-function staleHoursOf(configJson: string): number {
+/** The run's stale limit from its `config_json` (also used by `/status`). */
+export function staleHoursOf(configJson: string): number {
   try {
     const value = (JSON.parse(configJson) as { stale_hours?: unknown }).stale_hours;
     return typeof value === "number" && value > 0 ? value : DEFAULT_STALE_HOURS;

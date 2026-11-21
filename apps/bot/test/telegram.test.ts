@@ -184,6 +184,8 @@ describe("update helpers", () => {
   it("classifies documents, text and anything else", () => {
     expect(classifyUpdate({ message: { document: { file_id: "a" } } })).toBe("document");
     expect(classifyUpdate({ message: { text: "hi" } })).toBe("text");
+    expect(classifyUpdate({ message: { text: "/status" } })).toBe("command");
+    expect(classifyUpdate({ message: { text: "hi /status" } })).toBe("text");
     expect(classifyUpdate({ message: { photo: [] } })).toBe("other");
     expect(classifyUpdate(null)).toBe("other");
   });
