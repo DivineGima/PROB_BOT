@@ -670,3 +670,47 @@ Follow `docs/setup.md`: create the D1 database and commit its id; create the two
 1. Divine reviews and merges the documents pull request; Stage 8 starts only after that.
 2. Stage 8 step 9 needs Divine's phone and a second Telegram account (menu not shown, stranger gets no reply).
 3. Carried over: Divine's GitHub billing check; PR #3 (TypeScript 7) waits for a Dependabot rebase; local `biome check` on Windows reports CRLF; the earlier open items (`claude.md` in-place-edit wording, missing design-rules file, git identity).
+
+---
+
+## 2026-11-21 (Stage 8) - Read-only bot commands built and live (steps 1 to 8 complete; step 9 waits for Divine)
+
+- **Built against:** `PRD_3.md`, `system_architecture_3.md`, `system_architecture_essential_3.md` Stage 8 (all N=3). One branch and one pull request per step, each merged after green CI: #44 (step 1), #45 (2), #46 (3), #47 (4), #48 (5), #49 (6), #50 (7), and this docs PR (8).
+- **Read order:** the tracker showed Stages 1 to 7 built. Their remaining items are Divine's live checks (the drills, the 16 test predictions) and block no code. Essentials 3 was the next file with work; drift checks as in the version-3 entry (N=3 everywhere, no drift).
+- **What exists now:**
+  - **Commands:** ten read-only commands answer in the allowed chat: `/help` (`/start`), `/status`, `/fixtures` (verdicts only), `/logged`, `/results`, `/pending`, `/report`, `/last`, `/team`, `/alerts`.
+  - **Menu:** Telegram's "/" menu is registered at every deploy, scoped to the chat.
+  - **Usage hint:** it gains the line "Send /help to see the commands."
+  - **Unchanged:** the upload pipeline, the schema (no migration), the Python job and the secrets (no new one; `deploy.yml` reads the existing `TELEGRAM_CHAT_ID`).
+- **Safety, as tested:**
+  - Every command through the real webhook leaves the full contents of 13 tables unchanged and writes no event (invariant 9).
+  - A stranger, another user or a group gets no reply and causes no read.
+  - A replay is answered once.
+  - D1 failing mid-command gives `Internal error, id=...` and changes nothing.
+  - `/fixtures` never prints a probability.
+  - `repo/queries.ts` is checked read-only by `check-sql-locality.mjs`.
+  - The alert lists and the team-name normaliser are pinned to the Python and watchdog sources by `scripts/cross-language.test.mjs` and the shared vectors `packages/contracts/golden/normalise.json`.
+  - The `/report` keys are pinned by pytest.
+- **Measured:**
+  - **D1 calls per command:** `/status` 4, `/team` 2, the others 1, `/help` and bad input 0, with one Telegram send each.
+  - **Production:** deploy `0ca6e66` (commands live) and `c10a749` (menu: `set-webhook: command menu ok`) both green.
+- **Tests:** Worker 360 (was 238 at the start of the day), script tests 60, Python 648 (41 of them new contract tests). `tsc`, Biome, ruff, mypy and the repo checks are clean in CI.
+- **As built:** recorded in architecture §20.1 (the `QueryRepository` method set, `/status` making 4 D1 calls instead of at most 2, `/logged` using its own query so the upload's query stays untouched, the `/team` matching order, where the read-only and cross-language checks live).
+- **Docs:** `docs/runbook.md` section 10 (each command, and which command answers which alert); README "Bot commands"; `docs/verification.md` section 8.
+- **Lesson for later sessions:** on this machine the shell collapses double backslashes inside heredocs, so text with backslashes is written through script files. Biome's formatter on Windows also turns `\u` escapes inside regexes into literal characters.
+
+### Module status
+| Module | Status |
+|---|---|
+| Stages 1 to 7 | **complete** (unchanged) |
+| Stage 8 steps 1 to 8: grammar, read-only queries, cross-language pins, renderers, handlers and routing, menu, behaviour tests, docs | **complete** |
+| Stage 8 step 9: production check with Divine's phone | **in-progress** |
+
+### Open issues
+1. **Step 9 (Divine):**
+   - send each command once;
+   - from a second Telegram account, confirm `/status` gets no reply and the menu is not shown;
+   - Claude Code then reads `cpuTime` from Workers Logs (10+ requests each of `/status`, `/fixtures`, `/team`) and fills `docs/verification.md` section 8.
+
+   Stage 8 becomes `complete` after that.
+2. **Carried over:** Divine's GitHub billing check; PR #3 (TypeScript 7) is superseded by #42 (already on main) and can be closed; local `biome check` on Windows reports CRLF; the earlier open items (`claude.md` in-place-edit wording, missing design-rules file, git identity).

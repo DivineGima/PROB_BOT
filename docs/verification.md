@@ -204,3 +204,28 @@ If check 1 misses, the next steps are the F1 trims of the remaining parse and va
 - Warmed (11 samples): 5 to 8 ms, p50 7, max 8; 4 of 11 at 6 ms or under. First request of each burst: 17 and 14 ms. Handler time 0.9 to 1.1 s (target 30 s).
 - The trim gained about 1 ms on warmed requests (median 8 to 7) and 3 to 8 ms on the first request; the cold start itself is not something the validator affects. The 15- and 49-match files still cost the same, so the remaining cost is fixed (Telegram calls, D1 calls, the file hash, start-up).
 - **Decision (Divine, 2026-10-18): accept the miss and go to Stage 7.** No request failed at any time, including seven at or above 10 ms. What a strict enforcement would look like: a silent upload that is sent again; nothing is lost or wrong (the insert is all-or-nothing and a repeat is reported as already logged). Stage 7's watchdog is the safety net; the paid Workers plan stays the fallback if silent uploads ever happen.
+
+## 8. Stage 8: bot commands (version 3, essentials 3 step 9)
+
+**Measured in tests (local D1, `apps/bot/test/commands-webhook.test.ts`), per command, besides the one update-dedupe call:**
+
+| Command | D1 calls | Telegram calls |
+|---|---|---|
+| `/status` | 4 (one batch, plus the watchdog's three reads) | 1 |
+| `/team` | 2 | 1 |
+| `/fixtures`, `/logged`, `/results`, `/pending`, `/report`, `/last`, `/alerts` | 1 | 1 |
+| `/help`, `/start`, an unknown command, a bad argument | 0 | 1 |
+
+Every command left the full contents of 13 tables unchanged and wrote no event (invariant 9).
+
+**Production (2026-11-21):** deploy `c10a749` logged `set-webhook: command menu ok` (Telegram accepted the menu
+scoped to the allowed chat). The commands are live since deploy `0ca6e66`.
+
+**Still to do with Divine's phone (step 9), to fill in here:**
+
+| Check | Result |
+|---|---|
+| Each command once in the real chat; `/status` agrees with the watchdog and the last nightly | pending |
+| `/fixtures` matches the same day's upload; `/logged` matches that upload's reply | pending |
+| From another Telegram account: `/status` gets no reply and the menu is not shown | pending |
+| CPU (`cpuTime` in Workers Logs), at least 10 requests each of `/status`, `/fixtures`, `/team`, plus one after a quiet spell; reply time p95 at most 10 s | pending |

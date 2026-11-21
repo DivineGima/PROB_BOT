@@ -1,4 +1,4 @@
-# Runbook (Stage 7)
+# Runbook (Stages 7 and 8)
 
 For Divine. What runs by itself, what to do when something is wrong, and the go-live checklist.
 Everything below uses pages you already know: GitHub Actions, the Cloudflare dashboard and Telegram.
@@ -78,3 +78,37 @@ If the repository ever becomes public, the Worker watchdog still alerts when the
 
 From the data workflow run `report`: it sends through the same Telegram sender as the alerts, so a message arriving proves the path.
 The watchdog sends only when something is wrong; to see it once, ask Claude to trigger it with a test finding.
+
+## 10. Bot commands (version 3)
+
+Send these in the bot chat at any time. They only **read** what is stored: none of them logs a prediction, starts
+a job or changes a model run, and they work only from your chat (anyone else gets no reply at all). Type `/` in the
+chat to see the menu. Dates are UTC calendar dates, like the screener file's `run_date_utc`.
+
+| Command | What you get |
+|---|---|
+| `/status` | Is everything OK? The live model run and its age, the models and weights, each nightly step, forecasts stored for today and tomorrow, unanswered uploads, alerts waiting, alert-delivery problems. Starts with `Status: OK` or `Status: ATTENTION` |
+| `/fixtures [today\|tomorrow\|YYYY-MM-DD]` | The fixtures with a stored forecast for the day (today to today + 4) and each verdict: `ok`, `DRIFT`, `INSUFFICIENT_HISTORY`, `NO_MODEL`. Also how many scheduled fixtures have no forecast (an upload would say `NO_FORECAST`). **Verdicts only, never probabilities** |
+| `/logged [today\|yesterday\|YYYY-MM-DD]` | The predictions already logged for a day, exactly as the upload reply showed them, with their status (pending, scored 2-1, void) |
+| `/results [n]` | The latest settled predictions (default 10, at most 20): the score, the logged H/D/A with `*` on what happened, the RPS (lower is better) |
+| `/pending` | Logged predictions waiting for a result |
+| `/report` | The latest weekly report as text (the chart still comes on Mondays) |
+| `/last` | What happened to your last upload: status, counts, error code |
+| `/team <name>` | A team's goals form (this season against the last 10) and its next stored fixture's verdict. Accents and `FC` do not matter: `/team atletico madrid` works |
+| `/alerts` | The alerts of the last 48 hours and whether each was delivered |
+| `/help` (or `/start`) | The list of commands |
+
+**Which command answers which alert:**
+
+| Alert or doubt | Send | What to look for |
+|---|---|---|
+| Run too old / no run published / the nightly job failed | `/status` | The run's age against its limit and the nightly step marked `FAILED` |
+| Upload(s) never answered, or the bot was silent after an upload | `/last` | The status of the last upload; `received` for over 10 minutes means send the file again |
+| No forecasts stored for a day | `/fixtures` (or `/fixtures tomorrow`) | `No forecasts are stored` or the count of fixtures without a forecast |
+| A match came back `NO_FORECAST` or `DRIFT` | `/fixtures`, then `/team <name>` | Whether the fixture is stored, and the team's season vs last-10 goals |
+| Did yesterday's predictions get scored? | `/results` and `/pending` | Scores and RPS, and what still waits |
+| An alert you did not see | `/alerts` | Each alert of the last 48 h, `delivered`, `waiting` (sent by the next nightly) or `sent by watchdog` |
+
+Probabilities still come **only** from an uploaded screener file, so the screener's gates always apply first.
+Commands that would change something (re-run, rollback, publish) are not built on purpose: use the Actions tab.
+If a command answers `Internal error, id=...`, nothing was changed; try again, and tell Claude the id if it repeats.
