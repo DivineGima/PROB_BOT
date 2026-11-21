@@ -13,7 +13,13 @@ import {
   percentile,
   summarise,
 } from "./cpu-stats.mjs";
-import { buildRegistration, setWebhook } from "./set-webhook.mjs";
+import {
+  buildCommandMenu,
+  buildRegistration,
+  run,
+  setCommandMenu,
+  setWebhook,
+} from "./set-webhook.mjs";
 import { runSmoke } from "./smoke.mjs";
 import { isMergedPrCommit, verifyMergedPr } from "./verify-merged-pr.mjs";
 
@@ -199,6 +205,91 @@ describe("verify-merged-pr", () => {
       (await verifyMergedPr({ repo: "bad repo", sha: SHA, token: "t", fetchImpl })).ok,
       false,
     );
+  });
+});
+
+describe("set-webhook: the command menu (ADR-052)", () => {
+  const envGood = {
+    WORKER_URL: "https://prob-bot.example.workers.dev",
+    WEBHOOK_PATH_SECRET: PATH_SECRET,
+    TELEGRAM_WEBHOOK_SECRET: HEADER_SECRET,
+    TELEGRAM_BOT_TOKEN: BOT_TOKEN,
+    TELEGRAM_CHAT_ID: "1001",
+  };
+  /** @param {(method: string) => Response} answer */
+  function recorder(answer) {
+    /** @type {{ method: string, body: any }[]} */
+    const seen = [];
+    const fetchImpl = /** @type {typeof fetch} */ (
+      async (url, init) => {
+        const method = String(url).split("/").pop() ?? "";
+        seen.push({ method, body: JSON.parse(String(init?.body)) });
+        return answer(method);
+      }
+    );
+    /** @type {string[]} */
+    const lines = [];
+    const out = {
+      log: (/** @type {string} */ m) => lines.push(`log ${m}`),
+      warn: (/** @type {string} */ m) => lines.push(`warn ${m}`),
+      error: (/** @type {string} */ m) => lines.push(`error ${m}`),
+    };
+    return { seen, fetchImpl, out, lines };
+  }
+
+  it("builds the menu from the shared command list, scoped to the allowed chat", () => {
+    const body = buildCommandMenu({ chatId: " 1001 " });
+    assert.deepEqual(body.scope, { type: "chat", chat_id: 1001 });
+    assert.ok(body.commands.some((c) => c.command === "status"));
+    assert.ok(body.commands.every((c) => Object.keys(c).sort().join() === "command,description"));
+    assert.throws(() => buildCommandMenu({ chatId: "@channel" }), /TELEGRAM_CHAT_ID/);
+  });
+
+  it("registers the webhook, then the menu", async () => {
+    const r = recorder(() => json({ ok: true, result: true }));
+    assert.equal(await run(envGood, r.fetchImpl, r.out), 0);
+    assert.deepEqual(
+      r.seen.map((s) => s.method),
+      ["setWebhook", "setMyCommands"],
+    );
+    assert.deepEqual(r.seen[1]?.body.scope, { type: "chat", chat_id: 1001 });
+    assert.deepEqual(r.lines, ["log set-webhook: ok", "log set-webhook: command menu ok"]);
+  });
+
+  it("skips the menu with a warning when TELEGRAM_CHAT_ID is not set", async () => {
+    const r = recorder(() => json({ ok: true, result: true }));
+    assert.equal(await run({ ...envGood, TELEGRAM_CHAT_ID: "" }, r.fetchImpl, r.out), 0);
+    assert.deepEqual(
+      r.seen.map((s) => s.method),
+      ["setWebhook"],
+    );
+    assert.match(r.lines.at(-1) ?? "", /^warn .*menu skipped/);
+  });
+
+  it("only warns when the menu fails, and never leaks the token", async () => {
+    const r = recorder((method) =>
+      method === "setMyCommands"
+        ? json({ ok: false, description: "Bad Request: chat not found" }, 400)
+        : json({ ok: true, result: true }),
+    );
+    assert.equal(await run(envGood, r.fetchImpl, r.out), 0);
+    const last = r.lines.at(-1) ?? "";
+    assert.match(last, /^warn .*HTTP 400\): Bad Request: chat not found/);
+    assert.ok(!last.includes(BOT_TOKEN));
+    await assert.rejects(
+      setCommandMenu({ botToken: BOT_TOKEN, chatId: "1001", fetchImpl: r.fetchImpl }),
+      /setMyCommands failed/,
+    );
+  });
+
+  it("stays fatal when the webhook fails, and then does not touch the menu", async () => {
+    const r = recorder(() => json({ ok: false, description: "Unauthorized" }, 401));
+    assert.equal(await run(envGood, r.fetchImpl, r.out), 1);
+    assert.deepEqual(
+      r.seen.map((s) => s.method),
+      ["setWebhook"],
+    );
+    assert.match(r.lines.at(-1) ?? "", /^error /);
   });
 });
 
