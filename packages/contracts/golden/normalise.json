@@ -1,0 +1,157 @@
+{
+  "$comment": "Team-name normaliser vectors (architecture 3, section 6.10). Generated from apps/fit/src/footy/aliases/normalise.py; apps/bot/src/commands/normalise.ts must give the same output. Checked by a Vitest and a pytest test.",
+  "cases": [
+    {
+      "input": "Arsenal",
+      "expected": "arsenal"
+    },
+    {
+      "input": "Bodø/Glimt",
+      "expected": "bodo glimt"
+    },
+    {
+      "input": "Fenerbahçe",
+      "expected": "fenerbahce"
+    },
+    {
+      "input": "1. FC Köln",
+      "expected": "1 koln"
+    },
+    {
+      "input": "Atlético Madrid",
+      "expected": "atletico madrid"
+    },
+    {
+      "input": "Paris Saint-Germain",
+      "expected": "paris saint germain"
+    },
+    {
+      "input": "AFC Bournemouth",
+      "expected": "bournemouth"
+    },
+    {
+      "input": "FC",
+      "expected": "fc"
+    },
+    {
+      "input": "  Real   Sociedad  ",
+      "expected": "real sociedad"
+    },
+    {
+      "input": "St. Mirren",
+      "expected": "st mirren"
+    },
+    {
+      "input": "Málaga CF",
+      "expected": "malaga cf"
+    },
+    {
+      "input": "Borussia Mönchengladbach",
+      "expected": "borussia monchengladbach"
+    },
+    {
+      "input": "Deportivo A Coruña",
+      "expected": "deportivo a coruna"
+    },
+    {
+      "input": "Vitória de Guimarães",
+      "expected": "vitoria de guimaraes"
+    },
+    {
+      "input": "Académico de Viseu",
+      "expected": "academico de viseu"
+    },
+    {
+      "input": "Bayern München",
+      "expected": "bayern munchen"
+    },
+    {
+      "input": "Heart of Midlothian",
+      "expected": "heart of midlothian"
+    },
+    {
+      "input": "Brighton & Hove Albion",
+      "expected": "brighton hove albion"
+    },
+    {
+      "input": "Wolverhampton Wanderers FC",
+      "expected": "wolverhampton wanderers"
+    },
+    {
+      "input": "ŁKS Łódź",
+      "expected": "lks lodz"
+    },
+    {
+      "input": "Þór Akureyri",
+      "expected": "thor akureyri"
+    },
+    {
+      "input": "Straße",
+      "expected": "strasse"
+    },
+    {
+      "input": "ẞTRASSE",
+      "expected": "sstrasse"
+    },
+    {
+      "input": "ÆØÅ",
+      "expected": "aeoa"
+    },
+    {
+      "input": "Œuvre",
+      "expected": "oeuvre"
+    },
+    {
+      "input": "Ðakovo",
+      "expected": "dakovo"
+    },
+    {
+      "input": "İstanbul Başakşehir",
+      "expected": "istanbul basaksehir"
+    },
+    {
+      "input": "PSV Eindhoven",
+      "expected": "psv eindhoven"
+    },
+    {
+      "input": "'s-Hertogenbosch",
+      "expected": "s hertogenbosch"
+    },
+    {
+      "input": "Inter Milan",
+      "expected": "inter milan"
+    },
+    {
+      "input": "FC Porto",
+      "expected": "porto"
+    },
+    {
+      "input": "fc afc",
+      "expected": "fc afc"
+    },
+    {
+      "input": "Ｆｕｌｌｗｉｄｔｈ　ＦＣ",
+      "expected": "fullwidth"
+    },
+    {
+      "input": "Club 1",
+      "expected": "club 1"
+    },
+    {
+      "input": "",
+      "expected": ""
+    },
+    {
+      "input": "!!!",
+      "expected": ""
+    },
+    {
+      "input": "Spurs​",
+      "expected": "spurs"
+    },
+    {
+      "input": "Côté",
+      "expected": "cote"
+    }
+  ]
+}
