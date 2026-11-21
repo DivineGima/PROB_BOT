@@ -29,6 +29,15 @@ const RULES = [
   },
 ];
 
+/**
+ * Files that must stay read-only (architecture 3, invariant 9, ADR-049): the bot commands' queries.
+ * A write keyword in quoted text or a `.run(` call fails the check.
+ */
+const READ_ONLY_FILES = /^apps\/bot\/src\/repo\/queries\.ts$/;
+const WRITE_IN_TEXT =
+  /\b(insert|update|delete|replace|upsert|create|drop|alter|pragma|attach|vacuum)\b/i;
+const WRITE_CALLS = [/\.run\s*\(/, /\.exec\s*\(/];
+
 /** @param {string} line */
 function isCommentOnly(line) {
   const t = line.trim();
@@ -56,6 +65,19 @@ export function findSqlViolations(root) {
       }
       if (rule.calls.some((p) => p.test(line))) {
         violations.push(`${file}:${i + 1}: database call outside the repo layer`);
+      }
+    });
+  }
+  for (const file of walk(root)) {
+    if (!READ_ONLY_FILES.test(file)) continue;
+    const lines = readFileSync(path.join(root, file), "utf8").split(/\r?\n/);
+    lines.forEach((line, i) => {
+      if (isCommentOnly(line)) return;
+      if (/["'`]/.test(line) && WRITE_IN_TEXT.test(line)) {
+        violations.push(`${file}:${i + 1}: write statement in a read-only query file`);
+      }
+      if (WRITE_CALLS.some((p) => p.test(line))) {
+        violations.push(`${file}:${i + 1}: write call in a read-only query file`);
       }
     });
   }

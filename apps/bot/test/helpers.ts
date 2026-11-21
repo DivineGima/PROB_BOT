@@ -39,8 +39,11 @@ export async function resetWorld(): Promise<void> {
     env.DB.prepare("DELETE FROM model_params"),
     env.DB.prepare("DELETE FROM model_runs"),
     env.DB.prepare("DELETE FROM events"),
+    env.DB.prepare("DELETE FROM job_runs"),
+    env.DB.prepare("DELETE FROM calibration_snapshots"),
     env.DB.prepare("DELETE FROM processed_updates"),
     env.DB.prepare("DELETE FROM matches"),
+    env.DB.prepare("DELETE FROM team_aliases"),
     env.DB.prepare("DELETE FROM teams"),
     env.DB.prepare("DELETE FROM competitions"),
   ]);
@@ -304,4 +307,146 @@ export async function count(table: string, where = "1=1"): Promise<number> {
     n: number;
   }>();
   return row?.n ?? -1;
+}
+
+// -- command-suite seeders (Stage 8) ----------------------------------------------------------------
+
+/** An upload row (any status); returns its id. */
+export async function seedUpload(
+  updateId: number,
+  fields: Record<string, string | number | null> = {},
+): Promise<number> {
+  const row = {
+    received_at: "2026-10-17T06:00:00Z",
+    status: "processed",
+    ...fields,
+  };
+  const columns = ["update_id", ...Object.keys(row)];
+  const values = [updateId, ...Object.values(row)];
+  const result = await env.DB.prepare(
+    `INSERT INTO uploads (${columns.join(", ")}) VALUES (${columns.map((_, i) => `?${i + 1}`).join(", ")})
+     RETURNING upload_id`,
+  )
+    .bind(...values)
+    .first<{ upload_id: number }>();
+  return result?.upload_id ?? -1;
+}
+
+export interface PredictionSpec {
+  home: number;
+  away: number;
+  uploadId: number;
+  comp?: string;
+  date?: string;
+  kickoff?: string;
+  status?: "pending" | "scored" | "void";
+  goals?: [number, number];
+  voidReason?: string;
+  pHome?: number;
+  rps?: number;
+  createdAt?: string;
+}
+
+/** A prediction row that satisfies every CHECK of migration 0005. */
+export async function seedPrediction(spec: PredictionSpec): Promise<void> {
+  const date = spec.date ?? RUN_DATE;
+  const comp = spec.comp ?? "EPL";
+  const status = spec.status ?? "pending";
+  const { p, overs } = forecastValues(spec.pHome ?? 0.5);
+  const scored = status === "scored";
+  const goals = spec.goals ?? (scored ? [2, 1] : null);
+  await env.DB.prepare(
+    `INSERT INTO predictions (
+       fixture_key, upload_id, run_id, label, comp_code, match_date, kickoff_utc, home_team_id,
+       away_team_id, p_home, p_draw, p_away, p_over_05, p_over_15, p_over_25, p_over_35, p_over_45,
+       p_over_55, total_json, models_json, weights_json, drift_json, baseline_json, inputs_json,
+       status, void_reason, goals_home, goals_away, rps_1x2, rps_totals, logloss_1x2, created_at,
+       scored_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, '[]',
+       '{}', ?19, '{}', '{}', '{}', ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)`,
+  )
+    .bind(
+      `${date}|${comp}|${spec.home}|${spec.away}`,
+      spec.uploadId,
+      RUN_ID,
+      `${date}_${comp}_${spec.home}_${spec.away}`,
+      comp,
+      date,
+      spec.kickoff ?? `${date}T15:00:00Z`,
+      spec.home,
+      spec.away,
+      ...p,
+      ...overs,
+      JSON.stringify({ bp: 0.3, dc: 0.4, pi: 0.3 }),
+      status,
+      status === "void" ? (spec.voidReason ?? "POSTPONED") : null,
+      goals?.[0] ?? null,
+      goals?.[1] ?? null,
+      scored ? (spec.rps ?? 0.1875) : null,
+      scored ? 0.2 : null,
+      scored ? 0.9 : null,
+      spec.createdAt ?? "2026-10-17T06:00:05Z",
+      scored ? "2026-10-18T01:30:00Z" : null,
+    )
+    .run();
+}
+
+/** An event row with an explicit time (the repository's own `record` uses the clock). */
+export async function seedEvent(
+  at: string,
+  kind: string,
+  fields: { level?: string; source?: string; deliveredAt?: string | null; detail?: string } = {},
+): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO events (at, level, source, kind, detail_json, delivered_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+  )
+    .bind(
+      at,
+      fields.level ?? "warn",
+      fields.source ?? "ingest",
+      kind,
+      fields.detail ?? null,
+      fields.deliveredAt ?? null,
+    )
+    .run();
+}
+
+export async function seedJob(
+  kind: string,
+  status: string,
+  startedAt: string,
+  finishedAt: string | null = null,
+): Promise<void> {
+  await env.DB.prepare(
+    "INSERT INTO job_runs (kind, started_at, finished_at, status) VALUES (?1, ?2, ?3, ?4)",
+  )
+    .bind(kind, startedAt, finishedAt, status)
+    .run();
+}
+
+export async function seedScheduledMatch(date: string, home: number, away: number): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO matches (comp_code, season, match_date, kickoff_utc, home_team_id, away_team_id,
+       status, updated_at) VALUES ('EPL', '2026-27', ?1, ?2, ?3, ?4, 'TIMED', '2026-10-17T00:00:00Z')`,
+  )
+    .bind(date, `${date}T15:00:00Z`, home, away)
+    .run();
+}
+
+export async function seedModelParams(model: string, status: "ok" | "failed"): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO model_params (run_id, model, status, payload_version, payload_json, payload_sha256,
+       error) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+  )
+    .bind(
+      RUN_ID,
+      model,
+      status,
+      status === "ok" ? 1 : null,
+      status === "ok" ? "{}" : null,
+      status === "ok" ? "hash" : null,
+      status === "ok" ? null : "did not converge",
+    )
+    .run();
 }
