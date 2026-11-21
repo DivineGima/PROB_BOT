@@ -1,0 +1,53 @@
+{
+  "$comment": "Display contract (architecture 4, ADR-056): how probabilities are drawn and labelled in Telegram. Read by the Worker (apps/bot/src/format/display.ts) and by the Python job (apps/fit/src/footy/report/display.py); a Vitest, a pytest and scripts/cross-language.test.mjs pin it. Display only: nothing here changes a stored number.",
+  "version": 1,
+  "bar": {
+    "cells": 10,
+    "empty": "⬜",
+    "home": "🟩",
+    "draw": "🟨",
+    "away": "🟥",
+    "goals": "🟦"
+  },
+  "favourite_labels": [
+    { "min": 0.6, "text": "💪 clear favourite" },
+    { "min": 0.5, "text": "👍 slight favourite" },
+    { "min": 0, "text": "🤷 open game" }
+  ],
+  "strongest_call": {
+    "candidates": [
+      "home",
+      "draw",
+      "away",
+      "over_1.5",
+      "under_1.5",
+      "over_2.5",
+      "under_2.5",
+      "over_3.5",
+      "under_3.5"
+    ],
+    "tie_tolerance": 1e-9
+  },
+  "grades": [
+    { "max": 0.15, "text": "🟢 good" },
+    { "max": 0.25, "text": "🟡 fair" },
+    { "max": null, "text": "🔴 poor" }
+  ],
+  "verdict_icons": {
+    "ok": "✅",
+    "DRIFT": "⚠️",
+    "INSUFFICIENT_HISTORY": "⛔",
+    "NO_MODEL": "❓"
+  },
+  "omission_icons": {
+    "UNMAPPED_TEAM": "❔",
+    "INSUFFICIENT_HISTORY": "⛔",
+    "DRIFT": "⚠️",
+    "STARTED": "⏱️",
+    "TOO_FAR": "📅",
+    "DATE_MISMATCH": "📅",
+    "NO_MODEL": "❓",
+    "DUPLICATE_PAIR": "♊",
+    "NO_FORECAST": "❓"
+  }
+}

@@ -133,8 +133,8 @@ describe("/status", () => {
     expect(findings.length).toBe(3);
 
     const { text } = await ask("/status");
-    expect(text.split("\n")[0]).toBe("Status: ATTENTION");
-    for (const f of findings) expect(text).toContain(`! ${f.text}`);
+    expect(text.split("\n")[0]).toBe("🔴 Status: ATTENTION");
+    for (const f of findings) expect(text).toContain(`⚠️ ${f.text}`);
     expect(text).toContain("Unanswered uploads: 1");
   });
 
@@ -147,7 +147,7 @@ describe("/status", () => {
     await seedScheduledMatch("2026-10-18", 3, 4);
     await seedForecast({ home: 3, away: 4, date: "2026-10-18" });
     const { text } = await ask("/status");
-    expect(text.split("\n")[0]).toBe("Status: OK");
+    expect(text.split("\n")[0]).toBe("🟢 Status: OK");
     expect(text).toContain(`Run ${RUN_ID}`);
     expect(text).toContain("limit 36 h");
     expect(text).toContain("2026-10-17 1/1, 2026-10-18 1/1");
@@ -170,7 +170,7 @@ describe("/fixtures", () => {
   it("refuses dates outside today to today + 4, and says when no run is published", async () => {
     for (const text of ["/fixtures yesterday", "/fixtures 2026-10-22"]) {
       expect((await ask(text)).text).toBe(
-        "Forecasts are stored for 2026-10-17 to 2026-10-21 (UTC dates). Usage: /fixtures [today|tomorrow|YYYY-MM-DD]",
+        "📅 Forecasts are stored for 2026-10-17 to 2026-10-21 (UTC dates). Usage: /fixtures [today|tomorrow|YYYY-MM-DD]",
       );
     }
     expect((await ask("/fixtures 2026-10-21")).text).toContain("No model run is published");
@@ -204,9 +204,9 @@ describe("predictions: /logged, /results, /pending", () => {
     expect((await ask("/logged")).text).toContain("Status: pending");
     const yesterday = (await ask("/logged yesterday")).text;
     expect(yesterday).toContain("Status: scored 2-0");
-    expect(yesterday).toContain("1X2   H 50.0%");
+    expect(yesterday).toContain("50% 🏠");
     expect((await ask("/logged 2026-10-01")).text).toBe(
-      "Nothing logged for 2026-10-01 (UTC date).",
+      "📒 Nothing logged for 2026-10-01 (UTC date).",
     );
   });
 
@@ -239,13 +239,13 @@ describe("/report, /last, /alerts", () => {
   });
 
   it("shows the last upload", async () => {
-    expect((await ask("/last")).text).toBe("No upload has been received yet.");
+    expect((await ask("/last")).text).toBe("📨 No upload has been received yet.");
     await seedUpload(5, { status: "rejected", error_code: "E_SCHEMA_INVALID" });
     expect((await ask("/last")).text).toContain("Error E_SCHEMA_INVALID");
   });
 
   it("shows the alerts of the last 48 hours", async () => {
-    expect((await ask("/alerts")).text).toBe("No alerts in the last 48 hours.");
+    expect((await ask("/alerts")).text).toBe("🔔 No alerts in the last 48 hours.");
     await seedEvent("2026-10-17T01:00:00Z", "unmapped_team");
     await seedEvent("2026-10-14T01:00:00Z", "unmapped_team"); // too old
     const text = (await ask("/alerts")).text;
@@ -276,7 +276,7 @@ describe("/team", () => {
 
   it("lists several matches, prefers active clubs, and does not repeat unknown text", async () => {
     expect((await ask("/team madrid")).text).toBe(
-      "Several teams match: Atlético Madrid, Real Madrid. Send /team with the full name.",
+      "🔎 Several teams match: Atlético Madrid, Real Madrid. Send /team with the full name.",
     );
     const unknown = await ask("/team <script>Nowhere United</script>");
     expect(unknown.text).toBe(

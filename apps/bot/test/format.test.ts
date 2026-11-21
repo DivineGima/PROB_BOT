@@ -47,14 +47,25 @@ describe("formatKickoff (UTC and IST)", () => {
   });
 });
 
-describe("renderMatch", () => {
-  it("renders the section 8.8 block", () => {
+describe("renderMatch (v4 visual card, ADR-053)", () => {
+  it("renders the section 8.8 card: bars, most likely result, strongest call, goal lines", () => {
     expect(renderMatch(match())).toBe(
       [
-        "EPL  Arsenal vs Chelsea   17 Oct 15:00 UTC (20:30 IST)",
-        "1X2   H 52.1%  D 24.3%  A 23.6%",
-        "Over  0.5 97.0 | 1.5 84.2 | 2.5 61.0 | 3.5 36.4 | 4.5 17.8 | 5.5 7.2   (Under = 100 - Over)",
-        "Models dc+pi+bp   w 0.41/0.33/0.26   Drift: stable (goals only)",
+        "⚽ EPL · Arsenal vs Chelsea",
+        "🕐 17 Oct 15:00 UTC (20:30 IST)",
+        "",
+        "🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜ 52% 🏠 Arsenal",
+        "🟨🟨⬜⬜⬜⬜⬜⬜⬜⬜ 24% 🤝 Draw",
+        "🟥🟥⬜⬜⬜⬜⬜⬜⬜⬜ 24% ✈️ Chelsea",
+        "👉 Most likely result: Arsenal (52%) · 👍 slight favourite",
+        "⭐ Strongest call: Over 1.5 goals (2+), 84%",
+        "",
+        "Goals, chance of MORE than:",
+        "🟦🟦🟦🟦🟦🟦🟦🟦⬜⬜ 84%  1.5",
+        "🟦🟦🟦🟦🟦🟦⬜⬜⬜⬜ 61%  2.5",
+        "🟦🟦🟦🟦⬜⬜⬜⬜⬜⬜ 36%  3.5",
+        "0.5: 97% · 4.5: 18% · 5.5: 7%  (under = 100 - over)",
+        "📈 Form stable ✅ · models dc 0.41 / pi 0.33 / bp 0.26",
       ].join("\n"),
     );
   });
@@ -65,23 +76,48 @@ describe("renderMatch", () => {
 
   it("shows only the models that contributed", () => {
     const text = renderMatch(match({ weights: [["dc", 1]] }));
-    expect(text).toContain("Models dc   w 1.00");
+    expect(text).toContain("models dc 1.00");
+    expect(text).not.toContain("pi ");
   });
 
-  it("rounded display values stay within 0.15 points of 100 for any distribution", () => {
+  it("labels the favourite by its probability and names the away side or the draw", () => {
+    expect(renderMatch(match({ p1x2: [0.12, 0.15, 0.73] }))).toContain(
+      "👉 Most likely result: Chelsea (73%) · 💪 clear favourite",
+    );
+    expect(renderMatch(match({ p1x2: [0.3, 0.4, 0.3] }))).toContain(
+      "👉 Most likely result: Draw (40%) · 🤷 open game",
+    );
+  });
+
+  it("the strongest call can be a result when it beats every goal line", () => {
+    const text = renderMatch(
+      match({ p1x2: [0.82, 0.12, 0.06], overs: [0.95, 0.75, 0.55, 0.33, 0.15, 0.06] }),
+    );
+    expect(text).toContain("⭐ Strongest call: Arsenal win, 82%");
+  });
+
+  it("each bar has exactly 10 cells and the percentages are whole numbers for any distribution", () => {
     let seed = 12345;
     const random = () => {
       seed = (seed * 1664525 + 1013904223) % 4294967296;
       return seed / 4294967296;
     };
-    for (let i = 0; i < 2000; i++) {
+    for (let i = 0; i < 500; i++) {
       const a = random();
       const b = random() * (1 - a);
       const triple: [number, number, number] = [a, b, 1 - a - b];
       const text = renderMatch(match({ p1x2: triple }));
-      const shown = [...text.matchAll(/[HDA] (\d+\.\d)%/g)].map((m) => Number(m[1]));
+      const bars = text
+        .split("\n")
+        .filter((line) => line.includes("⬜") || /^[🟩🟨🟥🟦]/u.test(line));
+      expect(bars).toHaveLength(6);
+      for (const line of bars) {
+        const cells = [...line].filter((ch) => "🟩🟨🟥🟦⬜".includes(ch));
+        expect(cells).toHaveLength(10);
+      }
+      const shown = [...text.matchAll(/ (\d+)% [🏠🤝✈]/gu)].map((m) => Number(m[1]));
       expect(shown).toHaveLength(3);
-      expect(Math.abs(shown.reduce((s, v) => s + v, 0) - 100)).toBeLessThanOrEqual(0.15 + 1e-9);
+      expect(Math.abs(shown.reduce((sum, v) => sum + v, 0) - 100)).toBeLessThanOrEqual(2);
     }
   });
 });
@@ -105,7 +141,7 @@ describe("clean (nothing hostile reaches the reply)", () => {
 describe("renderOmission and renderError", () => {
   it("names the reason and keeps the note short", () => {
     expect(renderOmission({ comp: "EPL", home: "A", away: "B", reason: "NO_FORECAST" })).toBe(
-      "- EPL A vs B: NO_FORECAST, no stored forecast for this fixture",
+      "❓ EPL A vs B: NO_FORECAST, no stored forecast for this fixture",
     );
     const text = renderOmission({
       comp: "EPL",
@@ -159,7 +195,8 @@ describe("renderReply", () => {
 
   it("has a header, the blocks and one footer with the counts", () => {
     const [text] = renderReply(base);
-    expect(text).toContain("Probabilities for 2026-10-17");
+    expect(text).toContain("📊 Probabilities for 2026-10-17 · 1 match");
+    expect(text).toContain("⭐ Strongest call = the one outcome the bot is most sure of");
     expect(text).toContain("Run R20261017T011700Z (results to 2026-10-16)");
     expect(text).toContain("Published 1; omitted 0; excluded by the screener 5 (G2 4, OTHER 1)");
     expect(text).toContain("Drift: goals only; thresholds are starting values, unvalidated.");
@@ -195,6 +232,16 @@ describe("renderReply", () => {
     for (const message of messages) expect(message.length).toBeLessThanOrEqual(3900);
     expect(messages.at(-1)).toContain("Probabilities, not advice.");
     expect(messages[0]).toContain("Probabilities for");
+    // Every card is whole in one message, and 100 matches stay well inside the 50-subrequest
+    // budget (section 3.4: getFile 1 + download 1 + about 6 D1 batches + these sends).
+    const cards = messages.join("\n").match(/⚽ EPL · /g) ?? [];
+    expect(cards).toHaveLength(100);
+    for (const message of messages) {
+      const opened = (message.match(/⚽ EPL · /g) ?? []).length;
+      const closed = (message.match(/📈 Form stable/g) ?? []).length;
+      expect(opened).toBe(closed);
+    }
+    expect(messages.length + 8).toBeLessThanOrEqual(50);
   });
 
   it("never prints free text it was not given from our tables (hostile names are neutralised)", () => {

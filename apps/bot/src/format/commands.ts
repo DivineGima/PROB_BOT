@@ -11,12 +11,28 @@ import type {
   UploadRow,
   VerdictRead,
 } from "../repo";
+import {
+  bar,
+  callHit,
+  callText,
+  DISPLAY,
+  favouriteOf,
+  grade,
+  OUTCOME_ICON,
+  outcomeOf,
+  pct0,
+  strongestCall,
+  verdictIcon,
+} from "./display";
 import { clean, ERROR_TEXT, formatKickoff, packLines, renderMatch, splitBlocks } from "./index";
 
 /**
- * Replies of the read-only bot commands (architecture 3, sections 6.10 and 8.12). Pure functions:
+ * Replies of the read-only bot commands (architecture 4, sections 6.10 and 8.12). Pure functions:
  * plain text built from OUR stored rows (team names from our table, codes, numbers), every stored
  * string passed through `clean()`. The command's arguments are never interpolated (S15).
+ *
+ * [v4] The replies are visual (ADR-053): status icons, emoji bars and the strongest call (ADR-057),
+ * drawn by `./display` from `packages/contracts/display.json`. Still plain text, no parse mode.
  *
  * `/fixtures` prints verdicts only: its input type carries no probability (ADR-050).
  */
@@ -30,6 +46,8 @@ const pad2 = (n: number): string => String(n).padStart(2, "0");
 const pct = (p: number): string => `${(p * 100).toFixed(1)}%`;
 const fixed = (v: unknown, digits = 4): string =>
   typeof v === "number" && Number.isFinite(v) ? v.toFixed(digits) : "n/a";
+const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+const tick = (ok: boolean): string => (ok ? "✅" : "❌");
 
 export const UNKNOWN_COMMAND = "Unknown command. Send /help to see the commands.";
 export const PROBABILITIES_NOTE = "Probabilities come only from an uploaded screener file.";
@@ -59,6 +77,14 @@ function parseObject(text: string | null | undefined): Record<string, unknown> {
   }
 }
 
+/** A nested object of a parsed JSON object, or `{}`. */
+function objectAt(parent: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = parent[key];
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 /** Model weights in a stable order (dc, pi, bp, then any other). */
 export function weightsOf(weights: unknown): Array<[string, number]> {
   const object = typeof weights === "string" ? parseObject(weights) : (weights ?? {});
@@ -86,10 +112,25 @@ const teams = (home: string, away: string): string => `${clean(home)} vs ${clean
 
 // -- /help ------------------------------------------------------------------------------------------
 
+const HELP_ICONS: Readonly<Record<string, string>> = {
+  status: "🟢",
+  fixtures: "📅",
+  logged: "📒",
+  results: "📋",
+  pending: "⏳",
+  report: "📊",
+  last: "📨",
+  team: "🔎",
+  alerts: "🔔",
+  help: "❓",
+};
+
 export function renderHelp(): string[] {
-  const lines = ["Commands (they only read what is stored):"];
+  const lines = ["🤖 Commands (they only read what is stored):"];
   for (const c of COMMAND_SPECS) {
-    lines.push(`/${c.command}${c.args ? ` ${c.args}` : ""} - ${c.description}`);
+    lines.push(
+      `${HELP_ICONS[c.command] ?? "•"} /${c.command}${c.args ? ` ${c.args}` : ""} - ${c.description}`,
+    );
   }
   lines.push(
     "",
@@ -122,50 +163,51 @@ export function renderStatus(input: StatusInput): string[] {
     failedJobs.length > 0 ||
     s.alertPath.length > 0;
 
-  const lines = [`Status: ${attention ? "ATTENTION" : "OK"}`];
-  for (const text of input.findings) lines.push(`! ${clean(text, 300)}`);
+  const lines = [attention ? "🔴 Status: ATTENTION" : "🟢 Status: OK"];
+  for (const text of input.findings) lines.push(`⚠️ ${clean(text, 300)}`);
+  lines.push("");
 
   if (!s.run) {
-    lines.push("No model run is published.");
+    lines.push("🧠 No model run is published.");
   } else {
     const age = (now.getTime() - Date.parse(s.run.activatedAt)) / 3_600_000;
     const ageText = Number.isFinite(age) ? `${Math.floor(age)} h old` : "age unknown";
     lines.push(
-      `Run ${clean(s.run.runId, 40)}, published ${shortUtc(s.run.activatedAt)} (${ageText}, limit ${input.staleHours} h)`,
+      `🧠 Run ${clean(s.run.runId, 40)}, published ${shortUtc(s.run.activatedAt)} (${ageText}, limit ${input.staleHours} h)`,
     );
-    if (s.run.dataCutoffUtc) lines.push(`Results to ${clean(s.run.dataCutoffUtc, 10)}`);
+    if (s.run.dataCutoffUtc) lines.push(`   Results to ${clean(s.run.dataCutoffUtc, 10)}`);
     const weights = new Map(weightsOf(parseObject(s.run.ensembleJson).weights));
     const models = s.run.models.map((m) =>
       m.status === "ok"
-        ? `${m.model} ok${weights.has(m.model) ? ` ${fixed(weights.get(m.model), 2)}` : ""}`
-        : `${m.model} FAILED`,
+        ? `${m.model}${weights.has(m.model) ? ` ${fixed(weights.get(m.model), 2)}` : ""} ✅`
+        : `❌ ${m.model} FAILED`,
     );
-    lines.push(`Models: ${models.length ? models.join(", ") : "none recorded"}`);
+    lines.push(`   Models: ${models.length ? models.join(" · ") : "none recorded"}`);
   }
 
   lines.push(
     s.jobs.length
-      ? `Nightly: ${s.jobs
+      ? `🌙 Nightly: ${s.jobs
           .map(
             (j) =>
-              `${clean(j.kind, 16)} ${j.status === "failed" ? "FAILED" : clean(j.status, 12)} ${shortUtc(j.startedAt)}`,
+              `${j.status === "failed" ? "❌" : j.status === "ok" ? "✅" : "⏳"} ${clean(j.kind, 16)} ${j.status === "failed" ? "FAILED " : ""}${shortUtc(j.startedAt)}`,
           )
-          .join("; ")}`
-      : "Nightly: no job recorded",
+          .join(" · ")}`
+      : "🌙 Nightly: no job recorded",
   );
   lines.push(
-    `Forecasts stored / fixtures scheduled: ${s.coverage
+    `📅 Forecasts stored / fixtures scheduled: ${s.coverage
       .map((d) => `${d.date} ${d.forecasts}/${d.scheduled}`)
       .join(", ")}`,
   );
-  lines.push(`Unanswered uploads: ${input.stuckUploads === 0 ? "none" : input.stuckUploads}`);
-  lines.push(`Alerts waiting for the nightly delivery: ${s.alertsWaiting}`);
+  lines.push(`📨 Unanswered uploads: ${input.stuckUploads === 0 ? "none" : input.stuckUploads}`);
+  lines.push(`🔔 Alerts waiting for the nightly delivery: ${s.alertsWaiting}`);
   lines.push(
     s.alertPath.length
-      ? `Alert delivery problems (24 h): ${s.alertPath
+      ? `⚠️ Alert delivery problems (24 h): ${s.alertPath
           .map((p) => `${clean(p.kind, 32)} x${p.n} (last ${shortUtc(p.last)})`)
           .join(", ")}`
-      : "Alert delivery problems (24 h): none",
+      : "✅ Alert delivery problems (24 h): none",
   );
   return capMessages([lines.join("\n")]);
 }
@@ -187,8 +229,8 @@ export function verdictSides(detailJson: string): string {
 }
 
 export function renderFixtures(date: string, read: VerdictRead | null): string[] {
-  if (!read) return ["No model run is published, so no forecasts are stored."];
-  const header = [`Fixtures for ${date} (UTC date), run ${clean(read.runId, 40)}`];
+  if (!read) return ["🧠 No model run is published, so no forecasts are stored."];
+  const header = [`📅 Fixtures for ${date} (UTC date), run ${clean(read.runId, 40)}`];
   if (read.rows.length === 0) {
     header.push(`No forecasts are stored for ${date}.`);
   } else {
@@ -197,18 +239,18 @@ export function renderFixtures(date: string, read: VerdictRead | null): string[]
     header.push(
       [...counts.entries()]
         .sort(([a], [b]) => (a === "ok" ? -1 : b === "ok" ? 1 : a.localeCompare(b)))
-        .map(([v, n]) => `${v} ${n}`)
-        .join(", "),
+        .map(([v, n]) => `${verdictIcon(v)} ${v} ${n}`)
+        .join(" · "),
     );
   }
   const lines = read.rows.map(
     (r) =>
-      `${clean(r.compCode, 4)}  ${teams(r.home, r.away)}  ${r.kickoffUtc ? formatKickoff(r.kickoffUtc) : "time unknown"}  ${clean(r.verdict, 24)}${r.verdict === "ok" ? "" : verdictSides(r.detailJson)}`,
+      `${verdictIcon(r.verdict)} ${clean(r.compCode, 4)}  ${teams(r.home, r.away)}  ${r.kickoffUtc ? formatKickoff(r.kickoffUtc) : "time unknown"}  ${clean(r.verdict, 24)}${r.verdict === "ok" ? "" : verdictSides(r.detailJson)}`,
   );
   const footer: string[] = [];
   if (read.unforecast > 0) {
     footer.push(
-      `${read.unforecast} scheduled fixture(s) have no forecast (an upload would answer NO_FORECAST).`,
+      `❓ ${read.unforecast} scheduled fixture(s) have no forecast (an upload would answer NO_FORECAST).`,
     );
   }
   footer.push(
@@ -219,7 +261,7 @@ export function renderFixtures(date: string, read: VerdictRead | null): string[]
 
 export function renderFixturesWindow(first: string, last: string): string[] {
   return [
-    `Forecasts are stored for ${first} to ${last} (UTC dates). Usage: /fixtures [today|tomorrow|YYYY-MM-DD]`,
+    `📅 Forecasts are stored for ${first} to ${last} (UTC dates). Usage: /fixtures [today|tomorrow|YYYY-MM-DD]`,
   ];
 }
 
@@ -231,9 +273,26 @@ function statusText(status: string, goals: [number, number] | null, voidReason: 
   return clean(status, 12);
 }
 
+/** `✅ Status: scored 2-0 · favourite right ✅ · ⭐ call right ❌` for a settled row. */
+function settledLine(
+  status: string,
+  goals: [number, number] | null,
+  voidReason: string | null,
+  p1x2: [number, number, number],
+  overs: number[],
+): string {
+  const text = statusText(status, goals, voidReason);
+  if (status !== "scored" || !goals) {
+    return `${status === "void" ? "⚪" : "⏳"} Status: ${text}`;
+  }
+  const favRight = favouriteOf(p1x2).outcome === outcomeOf(goals);
+  const callRight = callHit(strongestCall(p1x2, overs).key, goals);
+  return `${tick(favRight)} Status: ${text} · favourite right ${tick(favRight)} · ⭐ call right ${tick(callRight)}`;
+}
+
 export function renderLogged(date: string, rows: LoggedRow[]): string[] {
-  if (rows.length === 0) return [`Nothing logged for ${date} (UTC date).`];
-  const blocks = [`Logged for ${date} (UTC date): ${rows.length}`];
+  if (rows.length === 0) return [`📒 Nothing logged for ${date} (UTC date).`];
+  const blocks = [`📒 Logged for ${date} (UTC date): ${rows.length}`];
   for (const r of rows) {
     const block = renderMatch({
       comp: r.compCode,
@@ -246,7 +305,7 @@ export function renderLogged(date: string, rows: LoggedRow[]): string[] {
       alreadyLogged: false,
     });
     blocks.push(
-      `${block}\nStatus: ${statusText(r.status, r.goals, r.voidReason)}; logged ${shortUtc(r.createdAt)}`,
+      `${block}\n${settledLine(r.status, r.goals, r.voidReason, r.p1x2, r.overs)}\n🕓 logged ${shortUtc(r.createdAt)}`,
     );
   }
   blocks.push(
@@ -257,33 +316,57 @@ export function renderLogged(date: string, rows: LoggedRow[]): string[] {
 
 // -- /results ---------------------------------------------------------------------------------------
 
-const OUTCOMES = ["H", "D", "A"] as const;
+const OUTCOME_WORDS = { home: "home win", draw: "draw", away: "away win" } as const;
 
 export function renderResults(rows: SettledRow[]): string[] {
-  if (rows.length === 0) return ["No settled predictions yet."];
-  const lines = [`Latest settled predictions: ${rows.length} (* = what happened)`];
+  if (rows.length === 0) return ["📋 No settled predictions yet."];
+  const blocks = [`📋 Latest settled predictions: ${rows.length}`];
+  let scored = 0;
+  let favRight = 0;
+  let callRight = 0;
   for (const r of rows) {
-    const head = `${clean(r.compCode, 4)} ${shortDate(r.matchDate)}  ${teams(r.home, r.away)}`;
+    const head = `${clean(r.compCode, 4)} ${shortDate(r.matchDate)} · ${clean(r.home)}`;
     if (r.status === "void" || !r.goals) {
-      lines.push(`${head}  void (${clean(r.voidReason ?? "no result", 24)})`);
+      blocks.push(
+        `⚪ ${head} vs ${clean(r.away)}  void (${clean(r.voidReason ?? "no result", 24)})`,
+      );
       continue;
     }
     const [h, a] = r.goals;
-    const actual = h > a ? 0 : h === a ? 1 : 2;
-    const probs = r.p1x2.map((p, i) => `${OUTCOMES[i]} ${pct(p)}${i === actual ? "*" : ""}`);
-    lines.push(`${head}  ${h}-${a}  ${probs.join(" ")}  RPS ${fixed(r.rps1x2, 3)}`);
+    const actual = outcomeOf(r.goals);
+    const fav = favouriteOf(r.p1x2).outcome === actual;
+    const call = strongestCall(r.p1x2, r.overs);
+    const hit = callHit(call.key, r.goals);
+    scored += 1;
+    favRight += fav ? 1 : 0;
+    callRight += hit ? 1 : 0;
+    blocks.push(
+      [
+        `${tick(fav)} ${head} ${h}-${a} ${clean(r.away)}`,
+        `   ${OUTCOME_ICON.home} ${pct0(r.p1x2[0])}  ${OUTCOME_ICON.draw} ${pct0(r.p1x2[1])}  ${OUTCOME_ICON.away} ${pct0(r.p1x2[2])}  → ${OUTCOME_WORDS[actual]}`,
+        `   ⭐ ${callText(call.key, clean(r.home), clean(r.away))} ${pct0(call.p)} ${tick(hit)} · grade ${grade(r.rps1x2)} (RPS ${fixed(r.rps1x2, 3)})`,
+      ].join("\n"),
+    );
   }
-  lines.push("RPS: lower is better. Averages and the baseline are in /report.");
-  return capMessages(packLines(lines));
+  const summary = [
+    scored
+      ? `Summary: favourite right ${favRight} of ${scored} · ⭐ strongest call right ${callRight} of ${scored}`
+      : "Summary: nothing scored in this list.",
+    "✅/❌ at the start = the most likely result; ⭐ = the strongest call. Grade: 🟢 good · 🟡 fair · 🔴 poor (RPS, lower is better). Averages and the baseline are in /report.",
+  ];
+  blocks.push(summary.join("\n"));
+  return capMessages(blocks);
 }
 
 // -- /pending ---------------------------------------------------------------------------------------
 
 export function renderPending(read: { rows: PendingRow[]; total: number }): string[] {
-  if (read.total === 0) return ["No predictions are waiting for a result."];
-  const lines = [`Waiting for a result: ${read.total}`];
+  if (read.total === 0) return ["⏳ No predictions are waiting for a result."];
+  const lines = [`⏳ Waiting for a result: ${read.total}`];
   for (const r of read.rows) {
-    lines.push(`${clean(r.compCode, 4)}  ${teams(r.home, r.away)}  ${formatKickoff(r.kickoffUtc)}`);
+    lines.push(
+      `• ${clean(r.compCode, 4)}  ${teams(r.home, r.away)}  ${formatKickoff(r.kickoffUtc)}`,
+    );
   }
   if (read.total > read.rows.length) lines.push(`… and ${read.total - read.rows.length} more`);
   lines.push("A match with no result 3 days after kickoff is voided NO_RESULT.");
@@ -292,21 +375,74 @@ export function renderPending(read: { rows: PendingRow[]; total: number }): stri
 
 // -- /report ----------------------------------------------------------------------------------------
 
+/** `5 of 6 (83%)` from a `{n, hits}` object; `n/a` when absent. */
+function hitsOf(entry: Record<string, unknown>): string {
+  const n = num(entry.n);
+  const hits = num(entry.hits);
+  if (n === null || hits === null || n === 0) return "n/a";
+  return `${hits} of ${n} (${pct0(hits / n)})`;
+}
+
 export function renderReport(snapshot: SnapshotRow | null): string[] {
   if (!snapshot)
-    return ["No weekly report stored yet. It is made on Mondays once predictions are scored."];
+    return ["📊 No weekly report stored yet. It is made on Mondays once predictions are scored."];
   const m = parseObject(snapshot.metricsJson);
-  const paired = parseObject(JSON.stringify(m.paired ?? {}));
-  const omissions = parseObject(JSON.stringify(m.omissions ?? {}));
-  const byModel = parseObject(JSON.stringify(m.by_model ?? {}));
+  const paired = objectAt(m, "paired");
+  const omissions = objectAt(m, "omissions");
+  const byModel = objectAt(m, "by_model");
   const level = typeof paired.level === "number" ? `${Math.round(paired.level * 100)}%` : "n/a";
+  const nScored = num(m.n_scored) ?? 0;
+  const target = num(m.target) ?? 0;
 
   const lines = [
-    `Weekly report of ${shortUtc(snapshot.createdAt)} (matches ${clean(snapshot.windowFrom, 10)} to ${clean(snapshot.windowTo, 10)})`,
-    `Scored ${fixed(m.n_scored, 0)} of the ${fixed(m.target, 0)}-match target; pending ${fixed(m.n_pending, 0)}`,
-    `RPS 1X2 on ${fixed(paired.n, 0)} paired matches: ensemble ${fixed(paired.ensemble_rps_1x2)}, baseline ${fixed(paired.baseline_rps_1x2)}`,
-    `Difference ${fixed(paired.mean_diff_rps_1x2)} (negative = better than the baseline), ${level} interval ${fixed(paired.ci_low)} to ${fixed(paired.ci_high)}`,
+    `📊 Weekly report of ${shortUtc(snapshot.createdAt)} (matches ${clean(snapshot.windowFrom, 10)} to ${clean(snapshot.windowTo, 10)})`,
+    `📈 Progress ${target ? bar(nScored / target, DISPLAY.bar.home) : ""} Scored ${fixed(m.n_scored, 0)} of the ${fixed(m.target, 0)}-match target; pending ${fixed(m.n_pending, 0)}`,
+    "",
+    `🏆 RPS 1X2 on ${fixed(paired.n, 0)} paired matches (lower is better): bot ${fixed(paired.ensemble_rps_1x2)}, simple benchmark ${fixed(paired.baseline_rps_1x2)}`,
   ];
+  const diff = num(paired.mean_diff_rps_1x2);
+  const base = num(paired.baseline_rps_1x2);
+  const low = num(paired.ci_low);
+  const high = num(paired.ci_high);
+  if (diff !== null && base) {
+    const better = -diff / base;
+    lines.push(
+      `   The bot is ${pct0(Math.abs(better))} ${better >= 0 ? "better" : "worse"} than the benchmark. Difference ${fixed(diff)}, ${level} interval ${fixed(low)} to ${fixed(high)}`,
+    );
+  }
+  if (low !== null && high !== null) {
+    lines.push(
+      high < 0
+        ? "   🟢 Ahead, and the interval excludes zero (information, not a significance claim)."
+        : low > 0
+          ? "   🔴 Behind, and the interval excludes zero."
+          : "   🟡 Not proven yet: the interval includes zero, so it could still be luck.",
+    );
+  }
+
+  const strongest = objectAt(m, "strongest");
+  if (Object.keys(strongest).length) {
+    const said = num(strongest.mean_forecast);
+    lines.push(
+      "",
+      `⭐ Strongest calls right: ${hitsOf(strongest)}${said !== null ? ` · the bot said ${pct0(said)} on average` : ""}`,
+    );
+  }
+  const favourite = objectAt(m, "favourite");
+  if (Object.keys(favourite).length) {
+    const bands = objectAt(favourite, "by_band");
+    lines.push(
+      `👉 Favourite (most likely result) right: ${hitsOf(favourite)}`,
+      `   💪 60%+: ${hitsOf(objectAt(bands, "clear"))} · 👍 50-60%: ${hitsOf(objectAt(bands, "slight"))} · 🤷 under 50%: ${hitsOf(objectAt(bands, "open"))}`,
+    );
+  }
+  const goals = objectAt(m, "goals");
+  if (num(goals.expected) !== null) {
+    lines.push(
+      `⚽ Goals per match: expected ${fixed(goals.expected, 2)}, actual ${fixed(goals.actual, 2)}`,
+    );
+  }
+
   const models = weightsOf(
     Object.fromEntries(
       Object.entries(byModel).map(([name, v]) => [name, parseObject(JSON.stringify(v)).rps_1x2]),
@@ -314,7 +450,7 @@ export function renderReport(snapshot: SnapshotRow | null): string[] {
   );
   if (models.length) {
     lines.push(
-      `Per model RPS 1X2: ${models
+      `🧠 Per model RPS 1X2: ${models
         .map(([name, rps]) => {
           const n = parseObject(JSON.stringify(byModel[name])).n;
           return `${clean(name, 8)} ${fixed(rps)} (n ${fixed(n, 0)})`;
@@ -322,37 +458,44 @@ export function renderReport(snapshot: SnapshotRow | null): string[] {
         .join(", ")}`,
     );
   }
-  const reasons = parseObject(JSON.stringify(omissions.by_reason ?? {}));
+  const reasons = objectAt(omissions, "by_reason");
   const reasonText = Object.entries(reasons)
     .filter((e): e is [string, number] => typeof e[1] === "number")
     .map(([k, n]) => `${clean(k, 24)} ${n}`)
     .join(", ");
   lines.push(
-    `Omitted: ${typeof omissions.rate === "number" ? pct(omissions.rate) : "n/a"} of the matches seen${reasonText ? ` (${reasonText})` : ""}`,
+    `🚫 Omitted: ${typeof omissions.rate === "number" ? pct(omissions.rate) : "n/a"} of the matches seen${reasonText ? ` (${reasonText})` : ""}`,
   );
   lines.push(
-    "Small samples are noisy: read this as information. The chart comes with the Monday report.",
+    "ℹ️ Small samples are noisy: read this as information. The chart comes with the Monday report.",
   );
   return capMessages([lines.join("\n")]);
 }
 
 // -- /last ------------------------------------------------------------------------------------------
 
+const UPLOAD_ICON: Readonly<Record<string, string>> = {
+  processed: "✅",
+  received: "⏳",
+  rejected: "⛔",
+  failed: "❌",
+};
+
 export function renderLast(upload: UploadRow | null, now: Date, stuckMinutes: number): string[] {
-  if (!upload) return ["No upload has been received yet."];
+  if (!upload) return ["📨 No upload has been received yet."];
   const n = (v: number | null): string => (v === null ? "-" : String(v));
   const lines = [
-    `Last upload: ${shortUtc(upload.receivedAt)}, status ${clean(upload.status, 12)}`,
-    `File date ${upload.runDateUtc ? clean(upload.runDateUtc, 10) : "-"}; matches ${n(upload.nMatchesIn)}; excluded by the screener ${n(upload.nExcludedIn)}; published ${n(upload.nPublished)}; omitted ${n(upload.nOmitted)}; already logged ${n(upload.nDuplicate)}`,
+    `${UPLOAD_ICON[upload.status] ?? "📨"} Last upload: ${shortUtc(upload.receivedAt)}, status ${clean(upload.status, 12)}`,
+    `📄 File date ${upload.runDateUtc ? clean(upload.runDateUtc, 10) : "-"}; matches ${n(upload.nMatchesIn)}; excluded by the screener ${n(upload.nExcludedIn)}; published ${n(upload.nPublished)}; omitted ${n(upload.nOmitted)}; already logged ${n(upload.nDuplicate)}`,
   ];
-  if (upload.runId) lines.push(`Run ${clean(upload.runId, 40)}`);
+  if (upload.runId) lines.push(`🧠 Run ${clean(upload.runId, 40)}`);
   if (upload.errorCode) {
     const text = (ERROR_TEXT as Record<string, string>)[upload.errorCode];
-    lines.push(`Error ${clean(upload.errorCode, 24)}${text ? `: ${text}` : ""}`);
+    lines.push(`❌ Error ${clean(upload.errorCode, 24)}${text ? `: ${text}` : ""}`);
   }
   const age = (now.getTime() - Date.parse(upload.receivedAt)) / 60_000;
   if (upload.status === "received" && age > stuckMinutes) {
-    lines.push("Never answered: send the file again.");
+    lines.push("⚠️ Never answered: send the file again.");
   }
   return [lines.join("\n")];
 }
@@ -364,16 +507,23 @@ export const TEAM_NOT_FOUND =
 
 export function renderTeamChoices(names: string[]): string[] {
   return [
-    `Several teams match: ${names.map((n) => clean(n)).join(", ")}. Send /team with the full name.`,
+    `🔎 Several teams match: ${names.map((n) => clean(n)).join(", ")}. Send /team with the full name.`,
   ];
+}
+
+/** Goals-per-match bars scale: a full bar is 3 goals a match. */
+const GOALS_BAR_MAX = 3;
+
+function goalsBar(value: number | null, cell: string): string {
+  return value === null ? "n/a" : `${bar(value / GOALS_BAR_MAX, cell)} ${fixed(value, 2)}`;
 }
 
 export function renderTeam(team: TeamRef, read: TeamFormRead | null): string[] {
   const lines = [
-    `${clean(team.name)} (${team.homeComp ? clean(team.homeComp, 4) : "UCL only"}, ${team.active ? "active" : "history-only"})`,
+    `🔎 ${clean(team.name)} (${team.homeComp ? clean(team.homeComp, 4) : "UCL only"}, ${team.active ? "active" : "history-only"})`,
   ];
   if (!read) {
-    lines.push("No model run is published.");
+    lines.push("🧠 No model run is published.");
     return [lines.join("\n")];
   }
   const f = read.form;
@@ -382,15 +532,22 @@ export function renderTeam(team: TeamRef, read: TeamFormRead | null): string[] {
   } else {
     lines.push(`Matches in the training window ${f.nTraining}; this season ${f.nSeason}`);
     lines.push(
+      "",
+      "⚽ Goals scored per match",
+      `   season   ${goalsBar(f.seasonGf, DISPLAY.bar.home)}`,
+      `   last ${f.l10N}  ${goalsBar(f.l10Gf, DISPLAY.bar.home)}`,
+      "🧤 Goals conceded per match",
+      `   season   ${goalsBar(f.seasonGa, DISPLAY.bar.away)}`,
+      `   last ${f.l10N}  ${goalsBar(f.l10Ga, DISPLAY.bar.away)}`,
       `Goals per match this season: for ${fixed(f.seasonGf, 2)}, against ${fixed(f.seasonGa, 2)}`,
     );
-    lines.push(`Last ${f.l10N} matches: for ${fixed(f.l10Gf, 2)}, against ${fixed(f.l10Ga, 2)}`);
     if (f.latestMatchDate) lines.push(`Latest match ${clean(f.latestMatchDate, 10)}`);
   }
   const next = read.nextFixture;
   lines.push(
+    "",
     next
-      ? `Next stored fixture: ${clean(next.compCode, 4)}  ${teams(next.home, next.away)}  ${next.kickoffUtc ? formatKickoff(next.kickoffUtc) : shortDate(next.matchDate)}  ${clean(next.verdict, 24)}`
+      ? `${verdictIcon(next.verdict)} Next stored fixture: ${clean(next.compCode, 4)}  ${teams(next.home, next.away)}  ${next.kickoffUtc ? formatKickoff(next.kickoffUtc) : shortDate(next.matchDate)}  ${clean(next.verdict, 24)}`
       : "No stored fixture from today on.",
   );
   lines.push(
@@ -401,12 +558,16 @@ export function renderTeam(team: TeamRef, read: TeamFormRead | null): string[] {
 
 // -- /alerts ----------------------------------------------------------------------------------------
 
-const STATE_TEXT = { delivered: "delivered", waiting: "waiting", watchdog: "sent by watchdog" };
+const STATE_TEXT = {
+  delivered: "✅ delivered",
+  waiting: "⏳ waiting",
+  watchdog: "🐕 sent by watchdog",
+};
 
 export function renderAlerts(read: AlertRead, hours: number): string[] {
-  if (read.total === 0) return [`No alerts in the last ${hours} hours.`];
+  if (read.total === 0) return [`🔔 No alerts in the last ${hours} hours.`];
   const lines = [
-    `Alerts in the last ${hours} hours: ${read.total} (${read.waiting} waiting for the nightly delivery)`,
+    `🔔 Alerts in the last ${hours} hours: ${read.total} (${read.waiting} waiting for the nightly delivery)`,
   ];
   for (const r of read.rows) {
     lines.push(`${shortUtc(r.at)}  ${clean(r.kind, 40)}  ${STATE_TEXT[r.state]}`);

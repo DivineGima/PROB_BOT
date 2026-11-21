@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     # Least privilege: the database token is the only secret every step shares. football-data.org
-    # reaches `ingest` only, Telegram reaches the report and the alert steps only.
+    # reaches `ingest` only, Telegram reaches the digest, report and alert steps only.
     env:
       PYTHONPATH: src
       CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
@@ -67,6 +67,14 @@ jobs:
 
       - name: Publish the run
         run: python -m footy.cli publish
+
+      - name: Daily results picture
+        # [v4, ADR-054] Sends a picture of the predictions scored since the last digest; nothing
+        # new means no message. A failed send fails this step and the matches are sent next night.
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m footy.cli digest --send
 
       - name: Weekly report (Mondays)
         env:

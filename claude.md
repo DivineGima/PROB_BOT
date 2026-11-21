@@ -6,7 +6,7 @@ This file is edited in place (not versioned). Read it fully at the start of ever
 
 Do these in order. A halt-and-flag at any step stops the whole sequence: do not continue to later steps and do not start coding.
 
-1. **`/tracker/`** — find the current phase and per-module status from the dated entries (Claude Code–maintained). Each entry must carry: a date, which essentials file + architecture version it was built against, and a status per module (`in-progress` / `complete`). If `/tracker/` is empty or has no entries (a `.gitkeep` alone), that is **not** an error: no phase has started — begin at `system_architecture_essential_1.md`.
+1. **`/tracker/tracker_N.md`** (the highest N; one tracker per version, `tracker_N` matches PRD_N) — find the current phase and per-module status from the dated entries (Claude Code–maintained). Each entry must carry: a date, which essentials file + architecture version it was built against, and a status per module (`in-progress` / `complete`). If `/tracker/` is empty or has no entries (a `.gitkeep` alone), that is **not** an error: no phase has started — begin at `system_architecture_essential_1.md`.
 2. **`/essentials/system_architecture_essential_N.md`** — the lowest-numbered essentials file that still has an incomplete stage per `/tracker/` (essential_1 if nothing has started). `essential_1` is the whole MVP, with every build step as ordered stages inside it; `essential_N` (N ≥ 2) holds only the new or changed work for version N. If the file does not exist, **halt and flag**; never improvise scope.
 3. **`/system_architecture/`** — resolve the current version: within this folder only, list files matching `^system_architecture_\d+\.md$`, extract the trailing integer, take the highest. If names do not parse cleanly (non-numeric suffix, gaps, duplicates) **halt and flag**. This pattern deliberately excludes `/essentials/system_architecture_essential_N.md`. Older versions are consulted only to resolve a conflict.
 4. **Essentials-vs-architecture drift check:** compare the `Source Architecture Version:` line in the phase's essentials file with the current version from step 3. If they differ, read the **Downstream Impact on Essentials** field of every intervening architecture changelog. All start with `NO_IMPACT` → log it and proceed. Any starts with `IMPACT`, or the field is missing → **halt and flag**.
@@ -16,7 +16,7 @@ Do these in order. A halt-and-flag at any step stops the whole sequence: do not 
 
 There is no direct essentials-vs-PRD check; the chain in steps 4 and 6 already covers it.
 
-**Version alignment check:** PRD_N ↔ system_architecture_N ↔ essential_N share the same N. **Halt and flag** if the highest-numbered files in `/prd/`, `/system_architecture/` and `/essentials/` do not share one N, or if an essentials file's source lines do not carry its own N. An architecture change always starts with a PRD bump; never create an essentials file per build step.
+**Version alignment check:** PRD_N ↔ system_architecture_N ↔ essential_N ↔ tracker_N share the same N. **Halt and flag** if the highest-numbered files in `/prd/`, `/system_architecture/` and `/essentials/` do not share one N, or if an essentials file's source lines do not carry its own N. An architecture change always starts with a PRD bump; never create an essentials file per build step.
 
 ## 2. Authority and conflicts
 
@@ -57,7 +57,7 @@ There is no direct essentials-vs-PRD check; the chain in steps 4 and 6 already c
 
 ## 5. Tracker discipline
 
-`/tracker/` is owned by Claude Code during implementation. After each working session add a dated entry (date; essentials file, stage and architecture version built against; per-module status `in-progress`/`complete`; open issues). Keep entries append-only.
+`/tracker/` is owned by Claude Code during implementation. After each working session add a dated entry (date; essentials file, stage and architecture version built against; per-module status `in-progress`/`complete`; open issues). Keep entries append-only. Entries for version N go in `tracker/tracker_N.md`; start `tracker_N.md` when version N's documents are written.
 
 ## 6. When unsure
 

@@ -44,6 +44,7 @@ from footy.publish.job import run_publish_job
 from footy.repo.d1_client import D1Client, D1Error, JsonFileProgress, MemoryProgress, Progress
 from footy.repo.ops import OpsRepo
 from footy.repo.ports import Database
+from footy.report.digest import run_digest_job
 from footy.report.job import run_report_job
 from footy.score.job import run_score_job
 from footy.telegram import TelegramSender
@@ -153,6 +154,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report.add_argument(
         "--monday-only", action="store_true", help="do nothing unless today (UTC) is a Monday"
+    )
+
+    digest = sub.add_parser(
+        "digest",
+        help="[v4] daily results picture of the predictions scored since the last digest",
+    )
+    digest.add_argument(
+        "--send", action="store_true", help="send the picture(s) to Telegram (needs the token)"
     )
 
     sub.add_parser(
@@ -356,6 +365,17 @@ def main(
                 sender=sender,
                 send=bool(args.send),
                 monday_only=bool(args.monday_only),
+                git_sha=git_sha,
+            )
+        elif args.command == "digest":
+            digest_sender = None
+            if args.send:
+                token, chat_id = settings.require_telegram()
+                digest_sender = sender_factory(token, chat_id)
+            result = run_digest_job(
+                database_factory(settings),
+                sender=digest_sender,
+                send=bool(args.send),
                 git_sha=git_sha,
             )
         elif args.command == "healthcheck":

@@ -202,7 +202,9 @@ def test_reaching_the_target_is_stated() -> None:
 def test_the_text_has_the_numbers_a_reader_needs() -> None:
     rows = [report_row(i, goals=(2, 0) if i % 3 else (0, 1)) for i in range(1, 41)]
     text = render_text(metrics_for(rows, omissions={"NO_FORECAST": 5}, pending=4), "2026-10-19")
-    assert text.startswith("Weekly report 2026-10-19")
+    assert text.startswith("📊 Weekly report 2026-10-19")
+    assert "⭐ Strongest calls right:" in text and "👉 Favourite" in text
+    assert "⚽ Goals per match: expected" in text
     assert "Scored predictions: 40 of the 300 needed (13%); 4 pending." in text
     assert "95% interval" in text and "difference" in text
     assert "Models, RPS 1X2" in text and "dc " in text

@@ -84,6 +84,7 @@ def test_the_nightly_job_runs_the_steps_in_order_and_ends_with_the_alerts() -> N
         "footy.cli score",
         "footy.cli fit",
         "footy.cli publish",
+        "footy.cli digest --send",
         "footy.cli report --send --monday-only",
         "footy.cli healthcheck",
         "footy.cli alert --flush",
@@ -122,6 +123,7 @@ def test_the_nightly_secrets_reach_only_the_steps_that_need_them() -> None:
 
     wants_football_data = {"Ingest results and fixtures"}
     wants_telegram = {
+        "Daily results picture",
         "Weekly report (Mondays)",
         "Send the alerts raised tonight",
         "Alert that the nightly job failed",

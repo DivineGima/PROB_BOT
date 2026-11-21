@@ -296,7 +296,7 @@ describe("the other paths are unchanged", () => {
     const stored = await env.DB.prepare(
       "SELECT p_home FROM predictions WHERE match_date = '2026-10-17'",
     ).first<{ p_home: number }>();
-    expect(tg.sent[0]?.text).toContain(`H ${((stored?.p_home ?? 0) * 100).toFixed(1)}%`);
+    expect(tg.sent[0]?.text).toContain(`${Math.floor((stored?.p_home ?? 0) * 100 + 0.5)}% 🏠`);
   });
 });
 

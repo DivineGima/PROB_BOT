@@ -93,12 +93,12 @@ describe("help", () => {
 describe("status", () => {
   it("is OK when nothing is wrong, with the run, models, nightly steps and coverage", () => {
     const text = status();
-    expect(text.split("\n")[0]).toBe("Status: OK");
+    expect(text.split("\n")[0]).toBe("🟢 Status: OK");
     expect(text).toContain(
       "Run R20261017T011700Z, published 17 Oct 01:30 UTC (4 h old, limit 36 h)",
     );
-    expect(text).toContain("Models: bp ok 0.30, dc ok 0.40, pi ok 0.30");
-    expect(text).toContain("ingest ok 17 Oct 01:17 UTC");
+    expect(text).toContain("Models: bp 0.30 ✅ · dc 0.40 ✅ · pi 0.30 ✅");
+    expect(text).toContain("✅ ingest 17 Oct 01:17 UTC");
     expect(text).toContain("2026-10-17 12/12, 2026-10-18 8/8");
     expect(text).toContain("Alert delivery problems (24 h): none");
   });
@@ -117,8 +117,8 @@ describe("status", () => {
       }),
     });
     const lines = text.split("\n");
-    expect(lines[0]).toBe("Status: ATTENTION");
-    expect(lines[1]).toBe("! The active model run R1 is 40 h old (limit 36 h).");
+    expect(lines[0]).toBe("🔴 Status: ATTENTION");
+    expect(lines[1]).toBe("⚠️ The active model run R1 is 40 h old (limit 36 h).");
     expect(text).toContain("dc FAILED");
     expect(text).toContain("fit FAILED");
     expect(text).toContain("Unanswered uploads: 2");
@@ -133,7 +133,7 @@ describe("status", () => {
     });
     const path = snapshot({ alertPath: [{ kind: "watchdog_failed", n: 1, last: "x" }] });
     for (const s of [failedModel, failedJob, path]) {
-      expect(status({ snapshot: s }).startsWith("Status: ATTENTION")).toBe(true);
+      expect(status({ snapshot: s }).startsWith("🔴 Status: ATTENTION")).toBe(true);
     }
   });
 
@@ -147,11 +147,11 @@ describe("fixtures (verdicts only, ADR-050)", () => {
     const messages = renderFixtures("2026-10-17", verdicts(4, { unforecast: 2 }));
     const text = messages.join("\n");
     expect(text).toContain("Fixtures for 2026-10-17 (UTC date), run R20261017T011700Z");
-    expect(text).toContain("ok 2, DRIFT 2");
+    expect(text).toContain("✅ ok 2 · ⚠️ DRIFT 2");
     expect(text).toContain(
-      "EPL  Club 1 vs Club 2  17 Oct 19:00 UTC (00:30 IST +1d)  DRIFT (home DRIFT)",
+      "⚠️ EPL  Club 1 vs Club 2  17 Oct 19:00 UTC (00:30 IST +1d)  DRIFT (home DRIFT)",
     );
-    expect(text).toContain("EPL  Club 3 vs Club 4  17 Oct 19:00 UTC (00:30 IST +1d)  ok");
+    expect(text).toContain("✅ EPL  Club 3 vs Club 4  17 Oct 19:00 UTC (00:30 IST +1d)  ok");
     expect(text).toContain("2 scheduled fixture(s) have no forecast");
     expect(text).toContain("Verdicts only.");
     expect(text).not.toMatch(PROBABILITY);
@@ -207,15 +207,18 @@ describe("logged", () => {
       logged({ home: "Club 5", status: "void", voidReason: "POSTPONED" }),
     ]).join("\n");
     expect(text).toContain("Logged for 2026-10-17 (UTC date): 3");
-    expect(text).toContain("1X2   H 50.0%  D 25.0%  A 25.0%");
-    expect(text).toContain("Models dc+pi+bp   w 0.40/0.30/0.30");
-    expect(text).toContain("Status: pending; logged 17 Oct 06:00 UTC");
-    expect(text).toContain("Status: scored 2-1");
-    expect(text).toContain("Status: void (POSTPONED)");
+    expect(text).toContain("🟩🟩🟩🟩🟩⬜⬜⬜⬜⬜ 50% 🏠 Club 1");
+    expect(text).toContain("models dc 0.40 / pi 0.30 / bp 0.30");
+    expect(text).toContain("⏳ Status: pending\n🕓 logged 17 Oct 06:00 UTC");
+    // Club 3 2-1: the home favourite came in; the strongest call (over 1.5 at 84%) too.
+    expect(text).toContain("✅ Status: scored 2-1 · favourite right ✅ · ⭐ call right ✅");
+    expect(text).toContain("⚪ Status: void (POSTPONED)");
   });
 
   it("says when nothing is logged", () => {
-    expect(renderLogged("2026-10-17", [])).toEqual(["Nothing logged for 2026-10-17 (UTC date)."]);
+    expect(renderLogged("2026-10-17", [])).toEqual([
+      "📒 Nothing logged for 2026-10-17 (UTC date).",
+    ]);
   });
 });
 
@@ -231,6 +234,7 @@ describe("results and pending", () => {
         voidReason: null,
         goals: [1, 1],
         p1x2: [0.5, 0.3, 0.2],
+        overs: [0.9, 0.7, 0.45, 0.25, 0.1, 0.04],
         rps1x2: 0.145,
       },
       {
@@ -242,14 +246,17 @@ describe("results and pending", () => {
         voidReason: "NO_RESULT",
         goals: null,
         p1x2: [0.5, 0.3, 0.2],
+        overs: [0.9, 0.7, 0.45, 0.25, 0.1, 0.04],
         rps1x2: null,
       },
     ]).join("\n");
-    expect(text).toContain(
-      "EPL 10 Oct  Club 1 vs Club 2  1-1  H 50.0% D 30.0%* A 20.0%  RPS 0.145",
-    );
-    expect(text).toContain("LL 9 Oct  Club 3 vs Club 4  void (NO_RESULT)");
-    expect(renderResults([])).toEqual(["No settled predictions yet."]);
+    // 1-1: the home favourite missed; the strongest call, under 3.5 at 75%, came true.
+    expect(text).toContain("❌ EPL 10 Oct · Club 1 1-1 Club 2");
+    expect(text).toContain("🏠 50%  🤝 30%  ✈️ 20%  → draw");
+    expect(text).toContain("⭐ Under 3.5 goals (3 or fewer) 75% ✅ · grade 🟢 good (RPS 0.145)");
+    expect(text).toContain("⚪ LL 9 Oct · Club 3 vs Club 4  void (NO_RESULT)");
+    expect(text).toContain("Summary: favourite right 0 of 1 · ⭐ strongest call right 1 of 1");
+    expect(renderResults([])).toEqual(["📋 No settled predictions yet."]);
   });
 
   it("lists pending predictions and how many more there are", () => {
@@ -262,7 +269,7 @@ describe("results and pending", () => {
     expect(text).toContain("Waiting for a result: 31");
     expect(text).toContain("… and 30 more");
     expect(renderPending({ rows: [], total: 0 })).toEqual([
-      "No predictions are waiting for a result.",
+      "⏳ No predictions are waiting for a result.",
     ]);
   });
 });
@@ -297,17 +304,19 @@ describe("report", () => {
       }),
     ).join("\n");
     expect(text).toContain("Scored 37 of the 300-match target; pending 4");
-    expect(text).toContain("ensemble 0.2040, baseline 0.2304");
+    expect(text).toContain("bot 0.2040, simple benchmark 0.2304");
     expect(text).toContain(
-      "Difference -0.0264 (negative = better than the baseline), 95% interval -0.0410 to -0.0120",
+      "The bot is 11% better than the benchmark. Difference -0.0264, 95% interval -0.0410 to -0.0120",
     );
+    expect(text).toContain("🟢 Ahead, and the interval excludes zero");
     expect(text).toContain("Per model RPS 1X2: dc 0.2042 (n 37), pi 0.2076 (n 37)");
     expect(text).toContain("Omitted: 25.0% of the matches seen (DRIFT 2, NO_FORECAST 1)");
   });
 
   it("shows n/a for missing keys and says when there is no report", () => {
     const text = renderReport(snapshotRow({ n_scored: 3 })).join("\n");
-    expect(text).toContain("ensemble n/a, baseline n/a");
+    expect(text).toContain("bot n/a, simple benchmark n/a");
+    expect(text).not.toContain("Strongest calls");
     expect(text).toContain("Omitted: n/a");
     expect(renderReport({ ...snapshotRow({}), metricsJson: "not json" }).join("\n")).toContain(
       "n/a",
@@ -339,7 +348,7 @@ describe("last upload", () => {
     expect(rejected.join("\n")).toContain("Error E_PARSE: The file is not valid UTF-8 JSON.");
     const stuck = renderLast({ ...upload, status: "received" }, NOW, 10).join("\n");
     expect(stuck).toContain("Never answered: send the file again.");
-    expect(renderLast(null, NOW, 10)).toEqual(["No upload has been received yet."]);
+    expect(renderLast(null, NOW, 10)).toEqual(["📨 No upload has been received yet."]);
   });
 });
 
@@ -370,9 +379,10 @@ describe("team", () => {
     }).join("\n");
     expect(text).toContain("Club 1 (EPL, active)");
     expect(text).toContain("Goals per match this season: for 1.80, against 0.90");
-    expect(text).toContain("Last 9 matches: for 2.10, against 1.00");
+    expect(text).toContain("   last 9  🟩🟩🟩🟩🟩🟩🟩⬜⬜⬜ 2.10");
+    expect(text).toContain("   season   🟥🟥🟥⬜⬜⬜⬜⬜⬜⬜ 0.90");
     expect(text).toContain(
-      "Next stored fixture: EPL  Club 4 vs Club 1  18 Oct 15:00 UTC (20:30 IST)  DRIFT",
+      "⚠️ Next stored fixture: EPL  Club 4 vs Club 1  18 Oct 15:00 UTC (20:30 IST)  DRIFT",
     );
   });
 
@@ -386,7 +396,7 @@ describe("team", () => {
     expect(bare).toContain("No form row in run R1.");
     expect(bare).toContain("No stored fixture from today on.");
     expect(renderTeamChoices(["Club 1", "Club 10"])[0]).toBe(
-      "Several teams match: Club 1, Club 10. Send /team with the full name.",
+      "🔎 Several teams match: Club 1, Club 10. Send /team with the full name.",
     );
   });
 });
@@ -409,11 +419,11 @@ describe("alerts", () => {
       48,
     ).join("\n");
     expect(text).toContain("Alerts in the last 48 hours: 5 (1 waiting for the nightly delivery)");
-    expect(text).toContain("17 Oct 03:00 UTC  watchdog_stale_run  sent by watchdog");
+    expect(text).toContain("17 Oct 03:00 UTC  watchdog_stale_run  🐕 sent by watchdog");
     expect(text).toContain("… and 3 older not shown");
     expect(text).toContain("By kind: unmapped_team 4, watchdog_stale_run 1");
     expect(renderAlerts({ rows: [], total: 0, waiting: 0, byKind: [] }, 48)).toEqual([
-      "No alerts in the last 48 hours.",
+      "🔔 No alerts in the last 48 hours.",
     ]);
   });
 });
