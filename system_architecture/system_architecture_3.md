@@ -1872,3 +1872,19 @@ What stays as it is: the upload flow and its reply, the database schema (no migr
 
 Nothing in version 3 is deprecated or removed. Open items carried over unchanged: the `claude.md` in-place-edit wording, the missing design-rules file, git identity, Divine's GitHub billing check.
 
+### 20.1 As built (2026-11-21, Stage 8)
+
+Differences between the text above and the code, found while building. None changes a requirement or a decision.
+
+| Where | As built |
+|---|---|
+| §6.5 `QueryRepository` | The methods are `statusSnapshot` (run summary without payloads, newest step of each nightly kind, coverage, undelivered flush alerts, alert-path events: one batch, in place of separate `activeRunSummary`, `latestJobs` and `alertPathEvents`), `alertEvents` (rows, total, waiting, counts by kind), `forecastVerdicts`, `loggedForDate`, `settled`, `pending`, `latestSnapshot`, `latestUpload`, `teamCandidates`, `teamForm`. `teamNames` was not needed. The file is `apps/bot/src/repo/queries.ts`; the pointer read and the coverage count it shares with `repo/index.ts` moved to `repo/sql.ts` (one definition each) |
+| §6.10 `/logged` | Uses `QueryRepository.loggedForDate` (team names, result and logging time) instead of `PredictionRepository.findByDate`, so the upload pipeline's own query is untouched |
+| §6.10 limits | `/status` makes 4 D1 calls (its batch plus the three reads of the watchdog's `collectFindings`), not at most 2; `/team` 2; the others 1; with one Telegram send each (measured, `docs/verification.md` section 8). The subrequest total stays at most 10 |
+| §6.10 `/status` | `ATTENTION` on a watchdog finding, a failed model of the active run, a newest nightly step with status `failed`, or an alert-path event; a step with status `partial` is shown but does not raise `ATTENTION` |
+| §6.10 `/fixtures` | The window uses the Worker constant `FORECAST_HORIZON_DAYS = 4`, equal to the fit job's `forecast.horizon_days`; a non-`ok` verdict names the side from the stored detail (`(home DRIFT)`), codes only, never numbers |
+| §6.10 `/team` | Order: exact normalised canonical name, then an alias of any source, then a unique substring of at least 3 characters; active clubs win over history-only ones; at most 5 choices |
+| §6.10 `/results` | Shows the logged H/D/A with `*` on the outcome and the stored `rps_1x2`; no average is computed in the Worker |
+| §8.12 read-only checks | The read-only rule is part of `scripts/check-sql-locality.mjs` (a write keyword in quoted text, or `.run(`/`.exec(`, in `repo/queries.ts` fails CI); the alert lists are compared with `ops.py`, `health.py` and the watchdog by `scripts/cross-language.test.mjs`; the normaliser vectors are `packages/contracts/golden/normalise.json`, generated from the Python normaliser |
+| §6.4 `setMyCommands` | `scripts/set-webhook.mjs` has a testable `run()`; the menu lists the ten commands of `bot_commands.json` (`/start` is an alias, not listed); verified on production 2026-11-21 (`command menu ok`) |
+| §6.3 kinds | `processed_updates.kind` is `command` for a text starting with `/`; a document with a `/` caption is still an upload |

@@ -56,7 +56,7 @@ Two programs, one small database:
 
 Design details: [system_architecture/system_architecture_3.md](system_architecture/system_architecture_3.md).
 
-**Planned (version 3, not built yet):** read-only bot commands (`/status`, `/fixtures`, `/logged`, `/results`, `/pending`, `/report`, `/last`, `/team`, `/alerts`, `/help`). Until Stage 8 is built, any text message still gets the one-line usage hint.
+**Bot commands (version 3):** besides the upload, the bot answers read-only commands such as `/status` and `/fixtures` (see [Bot commands](#bot-commands)).
 
 ## Using it every day
 
@@ -69,7 +69,28 @@ About two minutes:
 
 Sending the same file twice is safe: matches already logged come back with the same numbers marked
 `[already logged]`. If the bot does not answer, send the file again. If a text message is sent instead
-of a file, the bot answers with a one-line reminder.
+of a file, the bot answers with a short reminder that also points to `/help`.
+
+### Bot commands
+
+Send these in the bot chat at any time (type `/` to see the menu). They only read what is stored: none logs a
+prediction, starts a job or changes a model run, and they answer your chat only. Dates are UTC dates.
+
+| Command | What you get |
+|---|---|
+| `/status` | Is everything OK? The live model run and its age, the models and weights, each nightly step, forecasts stored for today and tomorrow, unanswered uploads, alerts waiting, alert-delivery problems. Starts with `Status: OK` or `Status: ATTENTION` |
+| `/fixtures [today\|tomorrow\|YYYY-MM-DD]` | The fixtures with a stored forecast for the day (today to today + 4) and each verdict: `ok`, `DRIFT`, `INSUFFICIENT_HISTORY`, `NO_MODEL`. Also how many scheduled fixtures have no forecast (an upload would say `NO_FORECAST`). **Verdicts only, never probabilities** |
+| `/logged [today\|yesterday\|YYYY-MM-DD]` | The predictions already logged for a day, exactly as the upload reply showed them, with their status (pending, scored 2-1, void) |
+| `/results [n]` | The latest settled predictions (default 10, at most 20): the score, the logged H/D/A with `*` on what happened, the RPS (lower is better) |
+| `/pending` | Logged predictions waiting for a result |
+| `/report` | The latest weekly report as text (the chart still comes on Mondays) |
+| `/last` | What happened to your last upload: status, counts, error code |
+| `/team <name>` | A team's goals form (this season against the last 10) and its next stored fixture's verdict. Accents and `FC` do not matter: `/team atletico madrid` works |
+| `/alerts` | The alerts of the last 48 hours and whether each was delivered |
+| `/help` (or `/start`) | The list of commands |
+
+Probabilities come only from an uploaded screener file. Which command to send for which alert:
+[docs/runbook.md section 10](docs/runbook.md#10-bot-commands-version-3).
 
 ## Reading a reply
 
@@ -237,7 +258,7 @@ Names only; the values live in GitHub (Settings, Secrets) or Cloudflare (`wrangl
 | [prd/PRD_3.md](prd/PRD_3.md) | What the product must do and why |
 | [system_architecture/system_architecture_3.md](system_architecture/system_architecture_3.md) | How it is built, the decision log (ADRs), risks |
 | [essentials/system_architecture_essential_2.md](essentials/system_architecture_essential_2.md) | The build plan for Stages 5 to 7 (built) |
-| [essentials/system_architecture_essential_3.md](essentials/system_architecture_essential_3.md) | The build plan for Stage 8, the read-only bot commands (next) |
+| [essentials/system_architecture_essential_3.md](essentials/system_architecture_essential_3.md) | The build plan for Stage 8, the read-only bot commands (built) |
 | [tracker/](tracker/) | The dated log of what was built, tested and decided |
 
 ## Limits
