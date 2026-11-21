@@ -66,6 +66,29 @@ describe("check-sql-locality", () => {
     assert.equal(v.filter((x) => x.includes("ingest/x.py")).length >= 2, true);
   });
 
+  it("keeps the command queries read-only (invariant 9)", () => {
+    const root = tree({
+      "apps/bot/src/repo/queries.ts": [
+        'db.prepare("SELECT kind FROM events WHERE at >= ?1");',
+        "const created = row.created_at;",
+        "// an update of the docs, in a comment",
+        'db.prepare("UPDATE uploads SET status = ?1");',
+        "db.prepare(`DELETE FROM events`);",
+        'db.prepare("SELECT 1").run();',
+        "",
+      ].join("\n"),
+      "apps/bot/src/repo/index.ts": 'db.prepare("UPDATE uploads SET status = ?1").run();\n',
+    });
+    assert.deepEqual(
+      findSqlViolations(root).map((x) => x.split(": ")[0]),
+      [
+        "apps/bot/src/repo/queries.ts:4",
+        "apps/bot/src/repo/queries.ts:5",
+        "apps/bot/src/repo/queries.ts:6",
+      ],
+    );
+  });
+
   it("passes on the real repository", () => {
     assert.deepEqual(findSqlViolations(REPO_ROOT), []);
   });

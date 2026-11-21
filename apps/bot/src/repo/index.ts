@@ -7,6 +7,18 @@
  * Worker never reads model parameters any more: the nightly job stores finished numbers.
  */
 import type { OmissionCode } from "../config/errors";
+import { createQueries, type QueryRepository } from "./queries";
+import {
+  type ActivePointer,
+  COVERAGE_SQL,
+  type CoverageSqlRow,
+  POINTER_SQL,
+  type PointerSqlRow,
+  toPointer,
+} from "./sql";
+
+export * from "./queries";
+export type { ActivePointer } from "./sql";
 
 export type Clock = () => Date;
 
@@ -108,15 +120,6 @@ export interface ActiveRun {
   configJson: string;
   ensembleJson: string;
   params: ModelParams[];
-}
-
-/** The small part of the active run: no model payloads. */
-export interface ActivePointer {
-  runId: string;
-  activatedAt: string;
-  dataCutoffUtc: string | null;
-  configJson: string;
-  ensembleJson: string;
 }
 
 /** The active run with the integrity result of each model payload, computed once per run. */
@@ -252,6 +255,8 @@ export interface Repositories {
   predictions: PredictionRepository;
   teams: TeamRepository;
   health: HealthRepository;
+  /** Read-only queries for the bot commands (architecture 3, section 6.10). */
+  queries: QueryRepository;
 }
 
 /** Lower-case hex SHA-256 of the text's UTF-8 bytes, the form `model_params.payload_sha256` uses. */
@@ -309,30 +314,6 @@ INSERT INTO omissions (upload_id, label, reason_code, detail_json)
 SELECT ?2, json_extract(j.value, '$.label'), json_extract(j.value, '$.reason'),
   json_extract(j.value, '$.detail')
 FROM json_each(?1) AS j`;
-
-/** The active run's metadata, read through the pointer (one definition for every reader). */
-const POINTER_SQL = `SELECT r.run_id, r.data_cutoff_utc, r.config_json, r.ensemble_json, a.activated_at
-  FROM active_run a JOIN model_runs r ON r.run_id = a.run_id
-  WHERE a.id = 1`;
-
-interface PointerSqlRow {
-  run_id: string;
-  data_cutoff_utc: string | null;
-  config_json: string | null;
-  ensemble_json: string | null;
-  activated_at: string;
-}
-
-function toPointer(row: PointerSqlRow | null | undefined): ActivePointer | null {
-  if (!row) return null;
-  return {
-    runId: row.run_id,
-    activatedAt: row.activated_at,
-    dataCutoffUtc: row.data_cutoff_utc,
-    configJson: row.config_json ?? "{}",
-    ensembleJson: row.ensemble_json ?? "{}",
-  };
-}
 
 const FORECAST_COLUMNS = `fixture_key, comp_code, match_date, kickoff_utc, home_team_id,
   away_team_id, verdict, p_home, p_draw, p_away, p_over_05, p_over_15, p_over_25, p_over_35,
@@ -763,26 +744,15 @@ export function createRepositories(db: D1Database, clock: Clock = () => new Date
     async forecastCoverage(dates) {
       if (dates.length === 0) return [];
       // One batch = one transaction, so every day is read against the same active run.
-      const results = await db.batch(
-        dates.map((date) =>
-          db
-            .prepare(
-              `SELECT
-                 (SELECT COUNT(*) FROM matches
-                   WHERE match_date = ?1 AND status IN ('SCHEDULED', 'TIMED')) AS scheduled,
-                 (SELECT COUNT(*) FROM fixture_forecasts
-                   WHERE run_id = (SELECT run_id FROM active_run WHERE id = 1)
-                     AND match_date = ?1) AS forecasts`,
-            )
-            .bind(date),
-        ),
-      );
+      const results = await db.batch(dates.map((date) => db.prepare(COVERAGE_SQL).bind(date)));
       return dates.map((date, i) => {
-        const row = results[i]?.results[0] as { scheduled: number; forecasts: number } | undefined;
+        const row = results[i]?.results[0] as CoverageSqlRow | undefined;
         return { date, scheduled: row?.scheduled ?? 0, forecasts: row?.forecasts ?? 0 };
       });
     },
   };
 
-  return { updates, uploads, events, runs, forecasts, predictions, teams, health };
+  const queries = createQueries(db);
+
+  return { updates, uploads, events, runs, forecasts, predictions, teams, health, queries };
 }
